@@ -1,0 +1,109 @@
+import { Router } from 'express';
+import { People } from '../models/index.js';
+import { createUpload } from '../middleware/upload.js';
+
+const router = Router();
+
+const profileUpload = createUpload({
+  folder: 'profiles',
+  filename: `profile_${Date.now()}`
+});
+
+// ============================================================
+// GET /api/hosts/:id - Get single host
+// ============================================================
+router.get('/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id as string);
+    const host = await People.findByPk(id);
+    if (!host) {
+      return res.status(404).json({ success: false, error: 'Host not found' });
+    }
+    res.json({ success: true, data: host });
+  } catch (error) {
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+// ============================================================
+// POST /api/hosts - Create host with profile picture
+// ============================================================
+router.post('/', profileUpload.single('profile_pic'), async (req, res) => {
+  try {
+    const data = req.body;
+    const file = (req as any).file;
+    if (file) {
+      data.profile_pic = `/profiles/${file.filename}`;
+    }
+    const host = await People.create(data);
+    res.status(201).json({ success: true, data: host });
+  } catch (error) {
+    console.error('Error creating host:', error);
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+// ============================================================
+// PUT /api/hosts/:id - Update host with profile picture
+// ============================================================
+router.put('/:id', profileUpload.single('profile_pic'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id as string);
+    const host = await People.findByPk(id);
+    if (!host) {
+      return res.status(404).json({ success: false, error: 'Host not found' });
+    }
+    
+    const data = req.body;
+    const file = (req as any).file;
+    if (file) {
+      data.profile_pic = `/profiles/${file.filename}`;
+    }
+    
+    await host.update(data);
+    res.json({ success: true, data: host });
+  } catch (error) {
+    console.error('Error updating host:', error);
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+// ============================================================
+// DELETE /api/hosts/:id - Delete host
+// ============================================================
+router.delete('/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id as string);
+    const host = await People.findByPk(id);
+    if (!host) {
+      return res.status(404).json({ success: false, error: 'Host not found' });
+    }
+    
+    await host.destroy();
+    res.json({ success: true, message: 'Host deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting host:', error);
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+// ============================================================
+// PATCH /api/hosts/:id/toggle-availability - Toggle host availability
+// ============================================================
+router.patch('/:id/toggle-availability', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id as string);
+    const host = await People.findByPk(id);
+    if (!host) {
+      return res.status(404).json({ success: false, error: 'Host not found' });
+    }
+    
+    await host.update({ is_available: !host.is_available });
+    res.json({ success: true, data: host });
+  } catch (error) {
+    console.error('Error toggling host availability:', error);
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+export default router;

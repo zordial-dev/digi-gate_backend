@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>simple home · sections</title>
+  <!-- one file: html + css -->
+  <style>
+    /* ----- reset & base ----- */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #f8fafc;
+      font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.5;
+      color: #0b1a2e;
+      padding: 1.5rem;
+    }
+
+    .page {
+      max-width: 1100px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 2rem;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.05);
+      overflow: hidden;
+      padding: 2rem 2rem 2.5rem;
+    }
+
+    /* ----- header / hero ----- */
+    .hero {
+      text-align: center;
+      padding: 1.5rem 0 2rem;
+      border-bottom: 1px solid #e9edf2;
+    }
+
+    .hero h1 {
+      font-size: 2.6rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      background: linear-gradient(145deg, #0b1a2e, #2a4b6e);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero p {
+      font-size: 1.2rem;
+      color: #3d556e;
+      margin-top: 0.4rem;
+      font-weight: 400;
+    }
+
+    /* ----- section grid (different sections) ----- */
+    .sections-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 2.5rem;
+      margin-top: 2.5rem;
+    }
+
+    /* each section card */
+    .section-card {
+      background: #ffffff;
+      border-radius: 1.8rem;
+      padding: 1.8rem 2rem 2rem;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.02);
+      border: 1px solid #eef2f6;
+      transition: 0.2s;
+    }
+
+    .section-card:hover {
+      border-color: #cdd9e6;
+      box-shadow: 0 8px 20px rgba(0, 20, 40, 0.04);
+    }
+
+    /* section header */
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1.2rem;
+    }
+
+    .section-header .icon {
+      font-size: 2rem;
+      line-height: 1;
+    }
+
+    .section-header h2 {
+      font-size: 1.8rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: #0b1a2e;
+    }
+
+    .section-header .badge {
+      margin-left: auto;
+      background: #eef4fa;
+      padding: 0.2rem 0.9rem;
+      border-radius: 30px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: #1f3b54;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    /* content inside sections */
+    .section-content {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 1.8rem;
+    }
+
+    .section-content p {
+      flex: 1 1 200px;
+      color: #1d334a;
+      font-size: 1rem;
+    }
+
+    .section-content .media-placeholder {
+      flex: 0 0 140px;
+      height: 100px;
+      background: #eef4fa;
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #1f3b54;
+      font-weight: 500;
+      font-size: 0.9rem;
+      background-image: repeating-linear-gradient(45deg, #dce5ef 0px, #dce5ef 2px, #eef4fa 2px, #eef4fa 8px);
+      border: 1px solid #d7e0ea;
+    }
+
+    .section-content .media-placeholder span {
+      background: rgba(255,255,255,0.7);
+      backdrop-filter: blur(2px);
+      padding: 0.2rem 1rem;
+      border-radius: 40px;
+    }
+
+    /* list / chips for "features" section */
+    .chip-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem 0.9rem;
+      margin-top: 0.6rem;
+    }
+
+    .chip {
+      background: #eef4fa;
+      padding: 0.3rem 1.2rem;
+      border-radius: 40px;
+      font-size: 0.9rem;
+      font-weight: 450;
+      color: #1a334c;
+      border: 1px solid #dce6f0;
+    }
+
+    .chip strong {
+      font-weight: 600;
+      color: #0b1a2e;
+    }
+
+    /* mini gallery (for portfolio) */
+    .mini-gallery {
+      display: flex;
+      gap: 0.8rem;
+      flex-wrap: wrap;
+      margin-top: 0.6rem;
+    }
+
+    .gallery-item {
+      background: #e2eaf3;
+      border-radius: 16px;
+      padding: 0.6rem 1.2rem;
+      font-size: 0.9rem;
+      border: 1px solid #cbd8e7;
+      background: white;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+    }
+
+    .gallery-item span {
+      opacity: 0.7;
+      margin-right: 0.3rem;
+    }
+
+    /* contact / social */
+    .contact-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.2rem 1.8rem;
+      align-items: center;
+    }
+
+    .contact-item {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: #f2f6fc;
+      padding: 0.3rem 1.2rem 0.3rem 0.8rem;
+      border-radius: 60px;
+      border: 1px solid #dee8f2;
+    }
+
+    .contact-item .emoji {
+      font-size: 1.3rem;
+    }
+
+    /* footer */
+    .footer-note {
+      margin-top: 3rem;
+      padding-top: 1.8rem;
+      border-top: 1px solid #e9edf2;
+      text-align: center;
+      color: #4a627c;
+      font-size: 0.95rem;
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .footer-note a {
+      color: #1f4a7a;
+      text-decoration: none;
+      border-bottom: 1px dotted #b7c8db;
+    }
+
+    .footer-note a:hover {
+      border-bottom: 1px solid #1f4a7a;
+    }
+
+    /* small screens */
+    @media (max-width: 600px) {
+      .page { padding: 1.5rem 1.2rem; }
+      .hero h1 { font-size: 2rem; }
+      .section-header h2 { font-size: 1.5rem; }
+      .section-card { padding: 1.5rem; }
+      .section-content .media-placeholder { flex: 0 0 100%; height: 90px; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+  <!-- HERO / header -->
+  <div class="hero">
+    <h1>✦ simple home</h1>
+    <p>different sections · clean &amp; minimal</p>
+  </div>
+
+  <!--  distinct sections  -->
+  <div class="sections-grid">
+
+    <!-- 1. about / intro -->
+    <div class="section-card">
+      <div class="section-header">
+        <span class="icon">👋</span>
+        <h2>About</h2>
+        <span class="badge">intro</span>
+      </div>
+      <div class="section-content">
+        <p><strong>Hi,</strong> this is a simple home page built with one HTML + CSS file. Each section is clearly separated, and the layout adapts to any screen. You can use this as a starter for your personal page, dashboard, or portfolio.</p>
+        <div class="media-placeholder"><span>📸 profile</span></div>
+      </div>
+    </div>
+
+    <!-- 2. features / highlights -->
+    <div class="section-card">
+      <div class="section-header">
+        <span class="icon">⚡</span>
+        <h2>Features</h2>
+        <span class="badge">highlights</span>
+      </div>
+      <div class="section-content">
+        <p>Quick overview of what makes this page useful:</p>
+        <div class="chip-list">
+          <span class="chip"><strong>📌</strong> 5 sections</span>
+          <span class="chip"><strong>🎨</strong> one file</span>
+          <span class="chip"><strong>📱</strong> responsive</span>
+          <span class="chip"><strong>🧩</strong> clean design</span>
+          <span class="chip"><strong>⚙️</strong> easy to edit</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. portfolio / projects (different style) -->
+    <div class="section-card">
+      <div class="section-header">
+        <span class="icon">🖼️</span>
+        <h2>Portfolio</h2>
+        <span class="badge">work</span>
+      </div>
+      <div class="section-content">
+        <p>Some recent projects — each card shows a different category.</p>
+        <div class="mini-gallery">
+          <div class="gallery-item"><span>📘</span> Brand</div>
+          <div class="gallery-item"><span>🌐</span> Web</div>
+          <div class="gallery-item"><span>📱</span> App</div>
+          <div class="gallery-item"><span>🎯</span> UI/UX</div>
+          <div class="gallery-item"><span>🖌️</span> Art</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. contact / social (different layout) -->
+    <div class="section-card">
+      <div class="section-header">
+        <span class="icon">📬</span>
+        <h2>Contact</h2>
+        <span class="badge">connect</span>
+      </div>
+      <div class="section-content">
+        <p>Reach out or follow — choose what suits you.</p>
+        <div class="contact-row">
+          <span class="contact-item"><span class="emoji">📧</span> hello@home.page</span>
+          <span class="contact-item"><span class="emoji">🐦</span> @simplehome</span>
+          <span class="contact-item"><span class="emoji">💼</span> linkedin/in/home</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. extra / meta (another distinct section) -->
+    <div class="section-card">
+      <div class="section-header">
+        <span class="icon">🗂️</span>
+        <h2>Meta</h2>
+        <span class="badge">info</span>
+      </div>
+      <div class="section-content">
+        <p>This page uses <strong>one file</strong> (HTML + CSS). No external dependencies, no JavaScript — just clean semantic markup and modern CSS.</p>
+        <div class="media-placeholder" style="flex: 0 0 120px; background: #e3ebf5; border-color: #c1d2e5;">
+          <span>📁 v1.0</span>
+        </div>
+      </div>
+    </div> 
+  </div>
+
+  <!-- footer -->
+  <div class="footer-note">
+    <span>© 2026 · simple home pager</span>
+    <span>made with 🧡 · <a href="#">one file</a></span>
+  </div>
+</div>
+</body>
+</html>

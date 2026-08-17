@@ -1,0 +1,38 @@
+### Variables
+@supabase_url = https://rfjdqyxrayskpcibgdgo.supabase.co
+@anon_key = sb_publishable_Q3eiaMNxCCecy0DSs8KA8g_KuY3_FL1
+
+### ------------------------------------------
+### 1. CREATE (POST) - Add a new task
+### ------------------------------------------
+POST {{supabase_url}}/rest/v1/tasks
+apikey: {{anon_key}}
+Content-Type: application/json
+
+{
+    "name": "Learn .rest files in VS Code",
+    "is_complete": false
+}
+
+### ------------------------------------------
+### 2. READ (GET) - View all tasks
+### ------------------------------------------
+GET {{supabase_url}}/rest/v1/tasks
+apikey: {{anon_key}}
+
+### ------------------------------------------
+### 3. UPDATE (PATCH) - Mark a task as complete
+### ------------------------------------------
+PATCH {{supabase_url}}/rest/v1/tasks?id=eq.1
+apikey: {{anon_key}}
+Content-Type: application/json
+
+{
+    "is_complete": true
+}
+
+### ------------------------------------------
+### 4. DELETE (DELETE) - Remove a task
+### ------------------------------------------
+DELETE {{supabase_url}}/rest/v1/tasks?id=eq.1
+apikey: {{anon_key}}
