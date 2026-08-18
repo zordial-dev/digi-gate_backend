@@ -8,6 +8,9 @@ import organisationsRoutes from './routes/organisations.js';
 import visitorsRoutes from './routes/visitors.js';
 import visitorVisitsRoutes from './routes/visitorVisits.js';
 import hostRoutes from './routes/hosts.js';
+import adminRoutes from './routes/admin.js';
+import authRoutes from './routes/auth.js';
+import { Users } from './models/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,25 +20,19 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware
+// Middleware & Routes Config
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Host ALL public files - This makes /organisations/logo.png work
-app.use('/', express.static(path.join(__dirname, '../public')));
+app.use('/public', express.static(path.join(__dirname, '../public')));
 
-// Or if you want to keep it under /public:
-// app.use('/public', express.static(path.join(__dirname, '../public')));
-
-// Add this import
-import adminRoutes from './routes/admin.js';
-
-// Add this after other routes
+// Auth & Admin Routes
+app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 
-// Routes
-
+// Other API Routes
 app.use('/api/hosts', hostRoutes);
 app.use('/api/organisations', organisationsRoutes);
 app.use('/api/visitors', visitorsRoutes);
@@ -55,18 +52,25 @@ app.use((err: Error, _req: any, res: any, _next: any) => {
   });
 });
 
+// Keep-alive timer to prevent Node event loop from closing prematurely
+setInterval(() => {}, 1000 * 60 * 60);
+
 // Start server
 const startServer = async (): Promise<void> => {
   try {
-    await sequelize.authenticate();
-    console.log('✅ Database connected successfully');
-
     app.listen(PORT, () => {
       console.log(`🚀 Server running on http://localhost:${PORT}`);
     });
+
+    await sequelize.authenticate();
+    console.log('✅ Database connected successfully');
+
+    Users.sync({ alter: true })
+      .then(() => console.log('✅ Users table synchronized successfully'))
+      .catch((err: any) => console.error('⚠️ Users table sync error:', err.message));
+
   } catch (error) {
     console.error('❌ Database connection failed:', error);
-    process.exit(1);
   }
 };
 

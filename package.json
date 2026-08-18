@@ -5,25 +5,31 @@
   "type": "module",
   "scripts": {
     "dev": "nodemon --exec tsx src/server.ts",
-    "build": "tsc && vite build",
+    "build": "tsc",
     "start": "node dist/server.js",
     "generate-models": "tsx src/scripts/generate-models.ts",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@types/nodemailer": "^8.0.1",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
     "multer": "^1.4.5-lts.1",
+    "nodemailer": "^9.0.5",
     "pg": "^8.22.0",
     "sequelize": "^6.37.8",
     "sequelize-auto": "^0.8.8"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^1.4.13",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.17",
