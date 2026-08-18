@@ -1,5 +1,6 @@
-const Sequelize = require('sequelize');
-module.exports = function(sequelize, DataTypes) {
+import { DataTypes, Sequelize } from 'sequelize';
+
+export default function(sequelize) {
   return sequelize.define('VisitorVisits', {
     id: {
       autoIncrement: true,
@@ -46,12 +47,12 @@ module.exports = function(sequelize, DataTypes) {
     visit_date: {
       type: DataTypes.DATEONLY,
       allowNull: false,
-      defaultValue: Sequelize.Sequelize.literal('CURRENT_DATE')
+      defaultValue: Sequelize.literal('CURRENT_DATE')
     },
     check_in_time: {
       type: DataTypes.DATE,
       allowNull: true,
-      defaultValue: Sequelize.Sequelize.literal('CURRENT_TIMESTAMP')
+      defaultValue: Sequelize.literal('CURRENT_TIMESTAMP')
     },
     host_available_at_submission: {
       type: DataTypes.BOOLEAN,
@@ -76,4 +77,4 @@ module.exports = function(sequelize, DataTypes) {
       },
     ]
   });
-};
+}

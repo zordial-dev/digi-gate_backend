@@ -1,6 +1,6 @@
-const Sequelize = require('sequelize');
+import { DataTypes } from 'sequelize';
 
-module.exports = function(sequelize, DataTypes) {
+export default function(sequelize) {
   return sequelize.define('Users', {
     id: {
       autoIncrement: true,
@@ -90,4 +90,4 @@ module.exports = function(sequelize, DataTypes) {
       }
     ]
   });
-};
+}

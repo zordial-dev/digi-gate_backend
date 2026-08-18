@@ -1,5 +1,6 @@
-const Sequelize = require('sequelize');
-module.exports = function(sequelize, DataTypes) {
+import { DataTypes } from 'sequelize';
+
+export default function(sequelize) {
   return sequelize.define('Organisations', {
     id: {
       autoIncrement: true,
@@ -55,7 +56,7 @@ module.exports = function(sequelize, DataTypes) {
     timezone: {
       type: DataTypes.STRING(50),
       allowNull: true,
-      defaultValue: "Asia\/Kolkata"
+      defaultValue: "Asia/Kolkata"
     },
     host_available_message: {
       type: DataTypes.TEXT,
@@ -93,4 +94,4 @@ module.exports = function(sequelize, DataTypes) {
       },
     ]
   });
-};
+}

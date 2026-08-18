@@ -1,11 +1,11 @@
-var DataTypes = require("sequelize").DataTypes;
-var _Organisations = require("./Organisations");
-var _People = require("./People");
-var _VisitorVisits = require("./VisitorVisits");
-var _Visitors = require("./Visitors");
-var _Users = require("./Users");
+import { DataTypes } from "sequelize";
+import _Organisations from "./Organisations.js";
+import _People from "./People.js";
+import _VisitorVisits from "./VisitorVisits.js";
+import _Visitors from "./Visitors.js";
+import _Users from "./Users.js";
 
-function initModels(sequelize) {
+export function initModels(sequelize) {
   var Organisations = _Organisations(sequelize, DataTypes);
   var People = _People(sequelize, DataTypes);
   var VisitorVisits = _VisitorVisits(sequelize, DataTypes);
@@ -34,6 +34,4 @@ function initModels(sequelize) {
     Users,
   };
 }
-module.exports = initModels;
-module.exports.initModels = initModels;
-module.exports.default = initModels;
+export default initModels;

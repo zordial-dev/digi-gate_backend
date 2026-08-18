@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: digi-gate-backend
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
