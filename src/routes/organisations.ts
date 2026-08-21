@@ -22,7 +22,7 @@ router.get('/:id', async (req, res) => {
         model: People,
         as: 'people',
         where: { is_active: true },
-        attributes: ['id', 'full_name', 'designation', 'email', 'profile_pic', 'is_available'],
+        attributes: ['id', 'full_name', 'designation', 'email', 'profile_pic', 'is_available', 'unavailable_dates'],
         required: false,
       },
     });
@@ -31,7 +31,24 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Organisation not found' });
     }
 
-    res.json({ success: true, data: organisation });
+    const todayStr = new Date().toISOString().split('T')[0];
+    const orgData = organisation.toJSON();
+    if (orgData.people) {
+      orgData.people = orgData.people.map((person: any) => {
+        const dates = Array.isArray(person.unavailable_dates) ? person.unavailable_dates : [];
+        const isDateOff = dates.includes(todayStr);
+        const toggleAvailable = person.is_available ?? true;
+        return {
+          ...person,
+          is_available_toggle: toggleAvailable,
+          is_date_unavailable: isDateOff,
+          is_available: toggleAvailable && !isDateOff,
+          unavailable_dates: dates,
+        };
+      });
+    }
+
+    res.json({ success: true, data: orgData });
   } catch (error) {
     console.error('Error:', error);
     res.status(500).json({ success: false, error: (error as Error).message });
@@ -139,11 +156,26 @@ router.get('/:id/hosts', async (req, res) => {
 
     const hosts = await People.findAll({
       where,
-      attributes: ['id', 'full_name', 'email', 'mobile_number', 'designation', 'department', 'profile_pic', 'is_available', 'is_active'],
+      attributes: ['id', 'full_name', 'email', 'mobile_number', 'designation', 'department', 'profile_pic', 'is_available', 'unavailable_dates', 'is_active'],
       order: [['full_name', 'ASC']],
     });
 
-    res.json({ success: true, data: hosts });
+    const todayStr = new Date().toISOString().split('T')[0];
+    const hostsData = hosts.map((h: any) => {
+      const item = h.toJSON();
+      const dates = Array.isArray(item.unavailable_dates) ? item.unavailable_dates : [];
+      const isDateOff = dates.includes(todayStr);
+      const toggleAvailable = item.is_available ?? true;
+      return {
+        ...item,
+        is_available_toggle: toggleAvailable,
+        is_date_unavailable: isDateOff,
+        is_available: toggleAvailable && !isDateOff,
+        unavailable_dates: dates,
+      };
+    });
+
+    res.json({ success: true, data: hostsData });
   } catch (error) {
     console.error('Error:', error);
     res.status(500).json({ success: false, error: (error as Error).message });
@@ -156,7 +188,7 @@ router.get('/:id/hosts', async (req, res) => {
 router.get('/:id/visitors', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const { page = 1, limit = 20, search, sortBy = 'created_at', sortOrder = 'DESC' } = req.query;
+    const { page = 1, limit = 20, search, sortBy = 'id', sortOrder = 'DESC' } = req.query;
 
     const offset = (parseInt(page as string) - 1) * parseInt(limit as string);
     const where: any = { organisation_id: id };
@@ -169,10 +201,12 @@ router.get('/:id/visitors', async (req, res) => {
       ];
     }
 
+    const validSortBy = sortBy === 'created_at' ? 'id' : (sortBy as string);
+
     const { count, rows } = await Visitors.findAndCountAll({
       where,
-      attributes: ['id', 'full_name', 'designation', 'company', 'location', 'email', 'linkedin', 'mobile_number', 'created_at'],
-      order: [[sortBy as string, sortOrder as string]],
+      attributes: ['id', 'full_name', 'designation', 'company', 'location', 'email', 'linkedin', 'mobile_number'],
+      order: [[validSortBy, sortOrder as string]],
       limit: parseInt(limit as string),
       offset,
     });

@@ -55,6 +55,11 @@ export default function(sequelize) {
       type: DataTypes.TIME,
       allowNull: true
     },
+    unavailable_dates: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      defaultValue: []
+    },
     is_active: {
       type: DataTypes.BOOLEAN,
       allowNull: true,

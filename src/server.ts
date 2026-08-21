@@ -65,9 +65,8 @@ const startServer = async (): Promise<void> => {
     await sequelize.authenticate();
     console.log('✅ Database connected successfully');
 
-    Users.sync({ alter: true })
-      .then(() => console.log('✅ Users table synchronized successfully'))
-      .catch((err: any) => console.error('⚠️ Users table sync error:', err.message));
+    await sequelize.sync({ alter: true });
+    console.log('✅ Database synchronized successfully');
 
   } catch (error) {
     console.error('❌ Database connection failed:', error);

@@ -22,24 +22,28 @@ router.post('/', upload.single('selfie'), async (req, res) => {
       otp_verified,
     } = req.body;
 
+    console.log('=== VISIT CREATION REQUEST ===');
+    console.log('Body:', req.body);
+    console.log('File:', (req as any).file?.filename);
+
     // Validation
     if (!visitor_id) {
-      return res.status(400).json({ error: 'Visitor ID required' });
+      return res.status(400).json({ success: false, error: 'Visitor ID is required' });
     }
     if (!host_id) {
-      return res.status(400).json({ error: 'Host selection required' });
+      return res.status(400).json({ success: false, error: 'Please select a Host person for your visit' });
     }
-    if (!purpose_of_visit || purpose_of_visit.length < 5) {
-      return res.status(400).json({ error: 'Purpose must be at least 5 characters' });
+    if (!purpose_of_visit || purpose_of_visit.trim().length < 5) {
+      return res.status(400).json({ success: false, error: 'Purpose of visit must be at least 5 characters long' });
     }
 
     // Get host details
     const host = await People.findByPk(host_id, {
-      attributes: ['is_available', 'full_name'],
+      attributes: ['is_available', 'unavailable_dates', 'full_name'],
     });
 
     if (!host) {
-      return res.status(404).json({ error: 'Host not found' });
+      return res.status(404).json({ success: false, error: 'Selected Host was not found' });
     }
 
     // Get visitor details
@@ -52,8 +56,12 @@ router.post('/', upload.single('selfie'), async (req, res) => {
       attributes: ['host_available_message', 'host_unavailable_message'],
     });
 
-    // Generate confirmation message
-    const isHostAvailable = host.is_available ?? true;
+    // Generate confirmation message using dual check (Toggle AND Calendar dates)
+    const todayStr = new Date().toISOString().split('T')[0];
+    const dates = Array.isArray((host as any).unavailable_dates) ? (host as any).unavailable_dates : [];
+    const isDateOff = dates.includes(todayStr);
+    const toggleAvailable = host.is_available ?? true;
+    const isHostAvailable = toggleAvailable && !isDateOff;
     let confirmationMessage = '';
 
     if (isHostAvailable) {
@@ -64,13 +72,19 @@ router.post('/', upload.single('selfie'), async (req, res) => {
         'Thank you for your interest :visitor_name. :host_name is currently unavailable.';
     }
 
-    // Replace placeholders using regex for :group format
+    // Replace placeholders supporting both :variable and {variable} formats
     const visitorName = visitor?.full_name || 'Guest';
     const hostName = host.full_name || 'Host';
     
-    // Using regex to replace :visitor_name and :host_name
-    confirmationMessage = confirmationMessage.replace(/:visitor_name/g, visitorName);
-    confirmationMessage = confirmationMessage.replace(/:host_name/g, hostName);
+    confirmationMessage = confirmationMessage
+      .replace(/:visitor_name/g, visitorName)
+      .replace(/\{visitor_name\}/g, visitorName)
+      .replace(/:visitor/g, visitorName)
+      .replace(/\{visitor\}/g, visitorName)
+      .replace(/:host_name/g, hostName)
+      .replace(/\{host_name\}/g, hostName)
+      .replace(/:host/g, hostName)
+      .replace(/\{host\}/g, hostName);
 
     const file = (req as any).file;
     const selfieUrl = file ? `/selfies/${file.filename}` : null;

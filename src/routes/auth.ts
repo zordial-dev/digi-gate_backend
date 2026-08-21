@@ -105,9 +105,8 @@ router.post('/signup', async (req: AuthRequest, res: Response): Promise<void> =>
       }
     }
 
-    // Hash password
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
+    // Store direct plain text password
+    const directPassword = password;
 
     // Generate 6-digit OTP
     const otpCode = generateOtp();
@@ -117,7 +116,7 @@ router.post('/signup', async (req: AuthRequest, res: Response): Promise<void> =>
     const newUser = await Users.create({
       username: finalUsername,
       email: email.trim(),
-      password: hashedPassword,
+      password: directPassword,
       full_name: full_name || null,
       phone: phone || null,
       role: finalRole,
@@ -272,14 +271,24 @@ router.post('/login', async (req: AuthRequest, res: Response): Promise<void> => 
       include: [{ model: Organisations, as: 'organisation' }]
     });
 
+    console.log('=== LOGIN ATTEMPT RECEIVED ===');
+    console.log('Payload:', { email, password });
+    console.log('DB User:', user ? { id: user.id, username: user.username, email: user.email, dbPassword: user.password } : 'NOT FOUND');
+
     if (!user) {
       res.status(400).json({ success: false, error: 'Invalid credentials. User does not exist.' });
       return;
     }
 
-    // Check password
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
+    // Check direct plain-text password (robust against whitespace)
+    const cleanReqPassword = String(password).trim();
+    const cleanDbPassword = String(user.password).trim();
+    const isDirectMatch = cleanReqPassword === cleanDbPassword || password === user.password;
+    const isLegacyHashMatch = user.password && user.password.startsWith('$2') 
+      ? await bcrypt.compare(cleanReqPassword, user.password).catch(() => false) 
+      : false;
+
+    if (!isDirectMatch && !isLegacyHashMatch) {
       res.status(400).json({ success: false, error: 'Invalid credentials. Password is incorrect.' });
       return;
     }
@@ -409,12 +418,9 @@ router.post('/reset-password', async (req: AuthRequest, res: Response): Promise<
       return;
     }
 
-    // Hash new password
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(new_password, salt);
-
+    // Save direct plain-text password
     await user.update({
-      password: hashedPassword,
+      password: new_password,
       otp_code: null,
       otp_expires_at: null,
       is_verified: true
