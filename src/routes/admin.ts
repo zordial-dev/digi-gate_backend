@@ -41,9 +41,9 @@ router.get('/dashboard/recent', async (req, res) => {
     const limit = parseInt(req.query.limit as string || '5');
 
     const organisations = await Organisations.findAll({
-      order: [['created_at', 'DESC']],
+      order: [['id', 'DESC']],
       limit: limit,
-      attributes: ['id', 'name', 'code', 'logo_url', 'city', 'is_active', 'created_at'],
+      attributes: ['id', 'name', 'code', 'logo_url', 'city', 'is_active'],
     });
 
     res.json({ success: true, data: organisations });
@@ -75,8 +75,8 @@ router.get('/organisations', async (req, res) => {
 
     const { count, rows } = await Organisations.findAndCountAll({
       where,
-      attributes: ['id', 'name', 'code', 'logo_url', 'city', 'is_active', 'created_at'],
-      order: [['created_at', 'DESC']],
+      attributes: ['id', 'name', 'code', 'logo_url', 'city', 'is_active'],
+      order: [['id', 'DESC']],
       limit: limit,
       offset,
     });
@@ -121,6 +121,30 @@ router.get('/organisations/:id', async (req, res) => {
 });
 
 // ============================================================
+// GET ORGANISATION HOSTS BY ID
+// ============================================================
+router.get('/organisations/:id/hosts', async (req, res) => {
+  try {
+    const organisation_id = parseInt(req.params.id as string);
+
+    if (isNaN(organisation_id)) {
+      return res.status(400).json({ success: false, error: 'Invalid ID' });
+    }
+
+    const hosts = await People.findAll({
+      where: { organisation_id },
+      order: [['full_name', 'ASC']],
+      attributes: ['id', 'full_name', 'email', 'mobile_number', 'designation', 'department', 'profile_pic', 'is_available'],
+    });
+
+    res.json({ success: true, data: hosts });
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+// ============================================================
 // CREATE ORGANISATION (with logo upload)
 // ============================================================
 const logoUpload = createUpload({
@@ -134,7 +158,7 @@ router.post('/organisations', logoUpload.single('logo'), async (req, res) => {
     const file = (req as any).file;
 
     if (file) {
-      data.logo_url = `/organisations/${file.filename}`;
+      data.logo_url = `/public/organisations/${file.filename}`;
     }
 
     const organisation = await Organisations.create(data);
@@ -166,7 +190,7 @@ router.put('/organisations/:id', logoUpload.single('logo'), async (req, res) => 
     }
 
     if (file) {
-      data.logo_url = `/organisations/${file.filename}`;
+      data.logo_url = `/public/organisations/${file.filename}`;
     }
 
     await organisation.update(data);

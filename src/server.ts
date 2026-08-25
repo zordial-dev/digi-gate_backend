@@ -25,8 +25,15 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Host ALL public files - This makes /organisations/logo.png work
-app.use('/public', express.static(path.join(__dirname, '../public')));
+// Host ALL static asset directories (/selfies, /public, /logos, etc.)
+const publicDir = path.join(__dirname, '../public');
+app.use('/public', express.static(publicDir));
+app.use('/selfies', express.static(path.join(publicDir, 'selfies')));
+app.use('/logos', express.static(path.join(publicDir, 'logos')));
+app.use('/hosts', express.static(path.join(publicDir, 'hosts')));
+app.use('/profiles', express.static(path.join(publicDir, 'profiles')));
+app.use('/organisations', express.static(path.join(publicDir, 'organisations')));
+app.use(express.static(publicDir));
 
 // Auth & Admin Routes
 app.use('/api/auth', authRoutes);

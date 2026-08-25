@@ -76,7 +76,7 @@ router.put('/:id', logoUpload.single('logo'), async (req, res) => {
     const data = req.body;
     const file = (req as any).file;
     if (file) {
-      data.logo_url = `/organisations/${file.filename}`;
+      data.logo_url = `/public/organisations/${file.filename}`;
     }
 
     await organisation.update(data);
