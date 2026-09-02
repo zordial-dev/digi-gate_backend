@@ -6,7 +6,7 @@ async function checkUser() {
     await sequelize.authenticate();
     const users = await Users.findAll();
     console.log('--- ALL USERS IN DB ---');
-    users.forEach(u => {
+    users.forEach((u: any) => {
       console.log(`ID: ${u.id} | Username: "${u.username}" | Email: "${u.email}" | Password: "${u.password}" | Role: "${u.role}"`);
     });
     process.exit(0);
