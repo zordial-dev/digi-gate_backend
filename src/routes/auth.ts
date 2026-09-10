@@ -284,8 +284,9 @@ router.post('/login', async (req: AuthRequest, res: Response): Promise<void> => 
     const cleanReqPassword = String(password).trim();
     const cleanDbPassword = String(user.password).trim();
     const isDirectMatch = cleanReqPassword === cleanDbPassword || password === user.password;
-    const isLegacyHashMatch = user.password && user.password.startsWith('$2') 
-      ? await bcrypt.compare(cleanReqPassword, user.password).catch(() => false) 
+
+    const isLegacyHashMatch = user.password && user.password.startsWith('$2')
+      ? await bcrypt.compare(cleanReqPassword, user.password).catch(() => false)
       : false;
 
     if (!isDirectMatch && !isLegacyHashMatch) {
