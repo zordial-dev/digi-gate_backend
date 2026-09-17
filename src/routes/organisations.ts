@@ -6,18 +6,46 @@ import { createUpload } from '../middleware/upload.js';
 
 const router = Router();
 
-// ============================================================
-// GET /api/organisations/:id - Get organisation by ID 
-// ============================================================
-router.get('/:id', async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
+/**
+ * Helper to resolve integer organisation ID from parameter (which can be ID, code, or name)
+ */
+async function getOrgIdFromParam(param: string): Promise<number | null> {
+  if (!param || !param.trim()) return null;
+  const trimmed = param.trim();
+  const isNum = !isNaN(Number(trimmed)) && Number.isInteger(Number(trimmed));
 
-    if (isNaN(id)) {
-      return res.status(400).json({ success: false, error: 'Invalid ID' });
+  if (isNum) {
+    const org = await Organisations.findByPk(Number(trimmed), { attributes: ['id'] });
+    if (org) return org.id;
+  }
+
+  const org = await Organisations.findOne({
+    where: {
+      [Op.or]: [
+        { code: { [Op.iLike]: trimmed } },
+        { name: { [Op.iLike]: trimmed } },
+      ],
+    },
+    attributes: ['id'],
+  });
+
+  return org ? org.id : null;
+}
+
+// ============================================================
+// GET /api/organisations/code/:code - Get organisation specifically by code
+// ============================================================
+router.get('/code/:code', async (req, res) => {
+  try {
+    const code = req.params.code;
+    if (!code || code.trim() === '') {
+      return res.status(400).json({ success: false, error: 'Organisation code is required', data: null });
     }
 
-    const organisation = await Organisations.findByPk(id, {
+    const organisation = await Organisations.findOne({
+      where: {
+        code: { [Op.iLike]: code.trim() },
+      },
       include: {
         model: People,
         as: 'people',
@@ -27,8 +55,8 @@ router.get('/:id', async (req, res) => {
       },
     });
 
-    if (!organisation) {
-      return res.status(404).json({ success: false, error: 'Organisation not found' });
+    if (!organisation || organisation.is_active === false) {
+      return res.status(404).json({ success: false, error: 'Organisation not found', data: null });
     }
 
     const todayStr = new Date().toISOString().split('T')[0];
@@ -51,7 +79,75 @@ router.get('/:id', async (req, res) => {
     res.json({ success: true, data: orgData });
   } catch (error) {
     console.error('Error:', error);
-    res.status(500).json({ success: false, error: (error as Error).message });
+    res.status(500).json({ success: false, error: (error as Error).message, data: null });
+  }
+});
+
+// ============================================================
+// GET /api/organisations/:id - Get organisation by ID, Code, or Name
+// ============================================================
+router.get('/:id', async (req, res) => {
+  try {
+    const param = req.params.id;
+    if (!param || param.trim() === '') {
+      return res.status(400).json({ success: false, error: 'Organisation identifier is required', data: null });
+    }
+
+    const isNum = !isNaN(Number(param)) && Number.isInteger(Number(param));
+
+    let whereClause: any;
+    if (isNum) {
+      whereClause = {
+        [Op.or]: [
+          { id: Number(param) },
+          { code: { [Op.iLike]: param.trim() } },
+        ],
+      };
+    } else {
+      whereClause = {
+        [Op.or]: [
+          { code: { [Op.iLike]: param.trim() } },
+          { name: { [Op.iLike]: param.trim() } },
+        ],
+      };
+    }
+
+    const organisation = await Organisations.findOne({
+      where: whereClause,
+      include: {
+        model: People,
+        as: 'people',
+        where: { is_active: true },
+        attributes: ['id', 'full_name', 'designation', 'email', 'profile_pic', 'is_available', 'unavailable_dates'],
+        required: false,
+      },
+    });
+
+    if (!organisation || organisation.is_active === false) {
+      return res.status(404).json({ success: false, error: 'Organisation not found', data: null });
+    }
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const orgData = organisation.toJSON();
+    if (orgData.people) {
+      orgData.people = orgData.people.map((person: any) => {
+        const dates = Array.isArray(person.unavailable_dates) ? person.unavailable_dates : [];
+        const isDateOff = dates.includes(todayStr);
+        const toggleAvailable = person.is_available ?? true;
+        return {
+          ...person,
+          is_available_toggle: toggleAvailable,
+          is_date_unavailable: isDateOff,
+          is_available: toggleAvailable && !isDateOff,
+          unavailable_dates: dates,
+        };
+      });
+    }
+
+    res.json({ success: true, data: orgData });
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ success: false, error: (error as Error).message, data: null });
   }
 });
 
@@ -62,10 +158,9 @@ const logoUpload = createUpload({
 
 router.put('/:id', logoUpload.single('logo'), async (req, res) => {
   try {
-    const id = parseInt(req.params.id as string);
-
-    if (isNaN(id)) {
-      return res.status(400).json({ success: false, error: 'Invalid ID' });
+    const id = await getOrgIdFromParam(req.params.id as string);
+    if (!id) {
+      return res.status(404).json({ success: false, error: 'Organisation not found' });
     }
 
     const organisation = await Organisations.findByPk(id);
@@ -93,7 +188,10 @@ router.put('/:id', logoUpload.single('logo'), async (req, res) => {
 // ============================================================
 router.get('/:id/settings', async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = await getOrgIdFromParam(req.params.id as string);
+    if (!id) {
+      return res.status(404).json({ success: false, error: 'Organisation not found' });
+    }
 
     const organisation = await Organisations.findByPk(id, {
       attributes: ['host_available_message', 'host_unavailable_message'],
@@ -121,7 +219,11 @@ router.get('/:id/settings', async (req, res) => {
 // ============================================================
 router.put('/:id/settings', async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = await getOrgIdFromParam(req.params.id as string);
+    if (!id) {
+      return res.status(404).json({ success: false, error: 'Organisation not found' });
+    }
+
     const { host_available_message, host_unavailable_message } = req.body;
 
     const organisation = await Organisations.findByPk(id);
@@ -146,7 +248,11 @@ router.put('/:id/settings', async (req, res) => {
 // ============================================================
 router.get('/:id/hosts', async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = await getOrgIdFromParam(req.params.id as string);
+    if (!id) {
+      return res.status(404).json({ success: false, error: 'Organisation not found' });
+    }
+
     const { is_active } = req.query;
 
     const where: any = { organisation_id: id };
@@ -187,7 +293,11 @@ router.get('/:id/hosts', async (req, res) => {
 // ============================================================
 router.get('/:id/visitors', async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = await getOrgIdFromParam(req.params.id as string);
+    if (!id) {
+      return res.status(404).json({ success: false, error: 'Organisation not found' });
+    }
+
     const { page = 1, limit = 20, search, sortBy = 'id', sortOrder = 'DESC' } = req.query;
 
     const offset = (parseInt(page as string) - 1) * parseInt(limit as string);
@@ -232,7 +342,11 @@ router.get('/:id/visitors', async (req, res) => {
 // ============================================================
 router.get('/:id/visits', async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = await getOrgIdFromParam(req.params.id as string);
+    if (!id) {
+      return res.status(404).json({ success: false, error: 'Organisation not found' });
+    }
+
     const { page = 1, limit = 20, startDate, endDate, hostId, visitorId } = req.query;
 
     const offset = (parseInt(page as string) - 1) * parseInt(limit as string);
@@ -291,7 +405,11 @@ router.get('/:id/visits', async (req, res) => {
 // ============================================================
 router.get('/:id/visits/today', async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = await getOrgIdFromParam(req.params.id as string);
+    if (!id) {
+      return res.status(404).json({ success: false, error: 'Organisation not found' });
+    }
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -329,7 +447,11 @@ router.get('/:id/visits/today', async (req, res) => {
 // ============================================================
 router.get('/:id/dashboard/stats', async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = await getOrgIdFromParam(req.params.id as string);
+    if (!id) {
+      return res.status(404).json({ success: false, error: 'Organisation not found' });
+    }
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -373,7 +495,11 @@ router.get('/:id/dashboard/stats', async (req, res) => {
 // ============================================================
 router.get('/:id/dashboard/recent', async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = await getOrgIdFromParam(req.params.id as string);
+    if (!id) {
+      return res.status(404).json({ success: false, error: 'Organisation not found' });
+    }
+
     const { limit = 5 } = req.query;
 
     const visits = await VisitorVisits.findAll({
@@ -406,7 +532,11 @@ router.get('/:id/dashboard/recent', async (req, res) => {
 // ============================================================
 router.get('/:id/dashboard/visitor-stats', async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = await getOrgIdFromParam(req.params.id as string);
+    if (!id) {
+      return res.status(404).json({ success: false, error: 'Organisation not found' });
+    }
+
     const { days = 7 } = req.query;
 
     const startDate = new Date();
