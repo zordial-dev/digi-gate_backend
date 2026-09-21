@@ -72,6 +72,15 @@ export default function(sequelize) {
       type: DataTypes.BOOLEAN,
       allowNull: true,
       defaultValue: true
+    },
+    is_approved: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0
+    },
+    block_reason: {
+      type: DataTypes.TEXT,
+      allowNull: true
     }
   }, {
     tableName: 'organisations',

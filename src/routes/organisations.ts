@@ -33,6 +33,52 @@ async function getOrgIdFromParam(param: string): Promise<number | null> {
 }
 
 // ============================================================
+// POST /api/organisations/register - Public organisation registration
+// ============================================================
+router.post('/register', async (req, res) => {
+  try {
+    const {
+      name,
+      address,
+      city,
+      state,
+      country,
+      pincode,
+      phone,
+      email,
+      website
+    } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ success: false, error: 'Name is required.' });
+    }
+
+    const code = `PENDING-${Date.now()}`;
+
+    const newOrg = await Organisations.create({
+      name: name.trim(),
+      code: code.trim(),
+      address: address?.trim() || null,
+      city: city?.trim() || null,
+      state: state?.trim() || null,
+      country: country?.trim() || null,
+      pincode: pincode?.trim() || null,
+      phone: phone?.trim() || null,
+      email: email?.trim() || null,
+      website: website?.trim() || null,
+      is_active: false,
+      is_approved: 0,
+      block_reason: null
+    });
+
+    res.status(201).json({ success: true, data: newOrg });
+  } catch (error) {
+    console.error('Registration Error:', error);
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+// ============================================================
 // GET /api/organisations/code/:code - Get organisation specifically by code
 // ============================================================
 router.get('/code/:code', async (req, res) => {
