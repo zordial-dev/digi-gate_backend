@@ -14,7 +14,7 @@ export default function(sequelize) {
     },
     code: {
       type: DataTypes.STRING(50),
-      allowNull: false,
+      allowNull: true,
       unique: "organisations_code_key"
     },
     address: {
@@ -71,7 +71,16 @@ export default function(sequelize) {
     is_active: {
       type: DataTypes.BOOLEAN,
       allowNull: true,
-      defaultValue: true
+      defaultValue: false
+    },
+    is_approved: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0
+    },
+    block_reason: {
+      type: DataTypes.TEXT,
+      allowNull: true
     }
   }, {
     tableName: 'organisations',

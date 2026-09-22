@@ -156,6 +156,122 @@ const logoUpload = createUpload({
   filename: `logo_${Date.now()}`
 });
 
+// ============================================================
+// POST /api/organisations/register - Business registration for new organisation
+// ============================================================
+router.post('/register', logoUpload.single('logo'), async (req, res) => {
+  try {
+    const {
+      name,
+      address,
+      city,
+      state,
+      country,
+      pincode,
+      phone,
+      website,
+      timezone,
+      host_available_message,
+      host_unavailable_message,
+    } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, error: 'Organisation name is required' });
+    }
+
+    const file = (req as any).file;
+    let logo_url = req.body.logo_url || null;
+    if (file) {
+      logo_url = `/public/organisations/${file.filename}`;
+    }
+
+    const newOrg = await Organisations.create({
+      name: name.trim(),
+      code: null,
+      address: address ? address.trim() : null,
+      city: city ? city.trim() : null,
+      state: state ? state.trim() : null,
+      country: country ? country.trim() : null,
+      pincode: pincode ? pincode.trim() : null,
+      phone: phone ? phone.trim() : null,
+      email: null,
+      website: website ? website.trim() : null,
+      logo_url: logo_url,
+      timezone: timezone && timezone.trim() ? timezone.trim() : 'Asia/Kolkata',
+      host_available_message: host_available_message ? host_available_message.trim() : undefined,
+      host_unavailable_message: host_unavailable_message ? host_unavailable_message.trim() : undefined,
+      is_active: false,
+      is_approved: 0,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Business registration submitted successfully! Pending administrator approval.',
+      data: newOrg,
+    });
+  } catch (error) {
+    console.error('Organisation registration error:', error);
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+// Alias: POST /api/organisations
+router.post('/', logoUpload.single('logo'), async (req, res) => {
+  try {
+    const {
+      name,
+      address,
+      city,
+      state,
+      country,
+      pincode,
+      phone,
+      website,
+      timezone,
+      host_available_message,
+      host_unavailable_message,
+    } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, error: 'Organisation name is required' });
+    }
+
+    const file = (req as any).file;
+    let logo_url = req.body.logo_url || null;
+    if (file) {
+      logo_url = `/public/organisations/${file.filename}`;
+    }
+
+    const newOrg = await Organisations.create({
+      name: name.trim(),
+      code: null,
+      address: address ? address.trim() : null,
+      city: city ? city.trim() : null,
+      state: state ? state.trim() : null,
+      country: country ? country.trim() : null,
+      pincode: pincode ? pincode.trim() : null,
+      phone: phone ? phone.trim() : null,
+      email: null,
+      website: website ? website.trim() : null,
+      logo_url: logo_url,
+      timezone: timezone && timezone.trim() ? timezone.trim() : 'Asia/Kolkata',
+      host_available_message: host_available_message ? host_available_message.trim() : undefined,
+      host_unavailable_message: host_unavailable_message ? host_unavailable_message.trim() : undefined,
+      is_active: false,
+      is_approved: 0,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Business registration submitted successfully! Pending administrator approval.',
+      data: newOrg,
+    });
+  } catch (error) {
+    console.error('Organisation registration error:', error);
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
 router.put('/:id', logoUpload.single('logo'), async (req, res) => {
   try {
     const id = await getOrgIdFromParam(req.params.id as string);
