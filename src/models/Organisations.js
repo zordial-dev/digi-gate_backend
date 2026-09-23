@@ -45,6 +45,10 @@ export default function(sequelize) {
       type: DataTypes.STRING(100),
       allowNull: true
     },
+    password: {
+      type: DataTypes.STRING(200),
+      allowNull: true
+    },
     website: {
       type: DataTypes.STRING(200),
       allowNull: true

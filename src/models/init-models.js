@@ -4,6 +4,7 @@ import _People from "./People.js";
 import _VisitorVisits from "./VisitorVisits.js";
 import _Visitors from "./Visitors.js";
 import _Users from "./Users.js";
+import _Roles from "./Roles.js";
 
 export function initModels(sequelize) {
   var Organisations = _Organisations(sequelize, DataTypes);
@@ -11,6 +12,7 @@ export function initModels(sequelize) {
   var VisitorVisits = _VisitorVisits(sequelize, DataTypes);
   var Visitors = _Visitors(sequelize, DataTypes);
   var Users = _Users(sequelize, DataTypes);
+  var Roles = _Roles(sequelize, DataTypes);
 
   People.belongsTo(Organisations, { as: "organisation", foreignKey: "organisation_id"});
   Organisations.hasMany(People, { as: "people", foreignKey: "organisation_id"});
@@ -23,8 +25,8 @@ export function initModels(sequelize) {
   VisitorVisits.belongsTo(Visitors, { as: "visitor", foreignKey: "visitor_id"});
   Visitors.hasMany(VisitorVisits, { as: "visitor_visits", foreignKey: "visitor_id"});
 
-  Users.belongsTo(Organisations, { as: "organisation", foreignKey: "organisation_id" });
-  Organisations.hasMany(Users, { as: "users", foreignKey: "organisation_id" });
+  Users.belongsTo(Roles, { as: "role", foreignKey: "role_id" });
+  Roles.hasMany(Users, { as: "users", foreignKey: "role_id" });
 
   return {
     Organisations,
@@ -32,6 +34,7 @@ export function initModels(sequelize) {
     VisitorVisits,
     Visitors,
     Users,
+    Roles,
   };
 }
 export default initModels;

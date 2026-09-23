@@ -9,6 +9,7 @@ export const {
   VisitorVisits,
   Visitors,
   Users,
+  Roles,
 } = models;
 
 export { sequelize };

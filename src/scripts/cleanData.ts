@@ -1,5 +1,5 @@
 import sequelize from '../config/database';
-import { Users, Organisations, Visitors, VisitorVisits } from '../models';
+import { Organisations, Visitors, VisitorVisits } from '../models';
 import { Op } from 'sequelize';
 
 async function cleanData() {
@@ -8,13 +8,13 @@ async function cleanData() {
     await sequelize.authenticate();
     console.log('Database connected successfully.');
 
-    // 1. Update ALL users' password to "123456"
-    console.log('Updating all user passwords to 123456...');
-    const [updatedUsersCount] = await Users.update(
+    // 1. Update ALL organisations' password to "123456"
+    console.log('Updating all organisation passwords to 123456...');
+    const [updatedOrgsCount] = await Organisations.update(
       { password: '123456' },
       { where: {} }
     );
-    console.log(`Updated ${updatedUsersCount} user passwords to '123456'.`);
+    console.log(`Updated ${updatedOrgsCount} organisation passwords to '123456'.`);
 
     // 2. Truncate/Delete all visitor_visits
     console.log('Truncating visitor_visits table...');
@@ -26,46 +26,10 @@ async function cleanData() {
     await Visitors.destroy({ where: {}, truncate: false });
     console.log('visitors cleaned.');
 
-    // 4. Find Zordial Organisation
-    let zordialOrg = await Organisations.findOne({
-      where: {
-        name: {
-          [Op.iLike]: '%zordial%'
-        }
-      }
-    });
-
-    if (!zordialOrg) {
-      console.log('Zordial organisation not found. Creating Zordial organisation...');
-      zordialOrg = await Organisations.create({
-        name: 'Zordial Technologies',
-        code: 'ZORDIAL',
-        is_active: true
-      });
-    }
-
-    console.log(`Zordial Organisation ID: ${zordialOrg.id} (${zordialOrg.name})`);
-
-    // Re-assign all non-admin users to Zordial organisation before removing other orgs
-    await Users.update(
-      { organisation_id: zordialOrg.id },
-      { where: { role: { [Op.ne]: 'super_admin' } } }
-    );
-
-    // 5. Remove all organisations EXCEPT Zordial
-    const deletedOrgsCount = await Organisations.destroy({
-      where: {
-        id: {
-          [Op.ne]: zordialOrg.id
-        }
-      }
-    });
-    console.log(`Deleted ${deletedOrgsCount} non-Zordial organisations.`);
-
-    console.log('Database cleanup completed successfully!');
+    console.log('--- Cleanup Completed Successfully ---');
     process.exit(0);
   } catch (error) {
-    console.error('Error cleaning database:', error);
+    console.error('Error cleaning data:', error);
     process.exit(1);
   }
 }

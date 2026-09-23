@@ -55,8 +55,17 @@ router.get('/code/:code', async (req, res) => {
       },
     });
 
-    if (!organisation || organisation.is_active === false) {
+    if (!organisation) {
       return res.status(404).json({ success: false, error: 'Organisation not found', data: null });
+    }
+
+    if (organisation.is_active === false || organisation.is_approved !== 1) {
+      return res.status(400).json({
+        success: false,
+        error: `Organisation "${organisation.name}" is inactive`,
+        org_name: organisation.name,
+        data: null,
+      });
     }
 
     const todayStr = new Date().toISOString().split('T')[0];
@@ -123,8 +132,17 @@ router.get('/:id', async (req, res) => {
       },
     });
 
-    if (!organisation || organisation.is_active === false) {
+    if (!organisation) {
       return res.status(404).json({ success: false, error: 'Organisation not found', data: null });
+    }
+
+    if (organisation.is_active === false || organisation.is_approved !== 1) {
+      return res.status(400).json({
+        success: false,
+        error: `Organisation "${organisation.name}" is inactive`,
+        org_name: organisation.name,
+        data: null,
+      });
     }
 
     const todayStr = new Date().toISOString().split('T')[0];

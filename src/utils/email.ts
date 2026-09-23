@@ -38,7 +38,7 @@ export const sendOtpEmail = async (email: string, otp: string, purpose: 'signup'
       <div style="background-color: #ffffff; padding: 24px; border-radius: 8px; border: 1px solid #e2e8f0;">
         <h3 style="color: #172525; margin-top: 0;">${titleText}</h3>
         <p style="color: #4a5d5c; font-size: 14px; line-height: 1.5;">
-          Your 6-digit One-Time Password (OTP) for <strong>${email}</strong> is:
+          Your static 4-digit One-Time Password (OTP) for <strong>${email}</strong> is:
         </p>
         <div style="text-align: center; margin: 24px 0;">
           <span style="display: inline-block; font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #035352; background: #F3E8BC; padding: 12px 24px; border-radius: 8px; border: 1px solid #e0d49d;">

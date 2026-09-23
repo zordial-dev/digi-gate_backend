@@ -9,8 +9,8 @@ import visitorsRoutes from './routes/visitors.js';
 import visitorVisitsRoutes from './routes/visitorVisits.js';
 import hostRoutes from './routes/hosts.js';
 import adminRoutes from './routes/admin.js';
+import adminUsersRoutes from './routes/adminUsers.js';
 import authRoutes from './routes/auth.js';
-import { Users } from './models/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,6 +37,7 @@ app.use(express.static(publicDir));
 
 // Auth & Admin Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/admin/users', adminUsersRoutes);
 app.use('/api/admin', adminRoutes);
 
 // Other API Routes

@@ -1,34 +1,27 @@
 import sequelize from '../config/database';
-import { Users } from '../models';
-import bcrypt from 'bcryptjs';
+import { Organisations } from '../models';
 
 async function testAuthDirect() {
   try {
     await sequelize.authenticate();
-    const email = 'admin@digigate.com';
+    const email = 'info@zordial.com';
     const password = '123456';
 
-    const user = await Users.findOne({
+    const org = await Organisations.findOne({
       where: { email: email.trim() }
     });
 
-    console.log('Found user:', user ? { id: user.id, email: user.email, dbPassword: user.password } : 'NONE');
+    console.log('Found org:', org ? { id: org.id, email: org.email, dbPassword: org.password } : 'NONE');
 
-    if (user) {
+    if (org) {
       const cleanReqPassword = String(password).trim();
-      const cleanDbPassword = String(user.password).trim();
-      const isDirectMatch = cleanReqPassword === cleanDbPassword || password === user.password;
-      const isLegacyHashMatch = user.password && user.password.startsWith('$2') 
-        ? await bcrypt.compare(cleanReqPassword, user.password).catch(() => false) 
-        : false;
-
+      const cleanDbPassword = String(org.password).trim();
+      const isDirectMatch = cleanReqPassword === cleanDbPassword;
       console.log('isDirectMatch:', isDirectMatch);
-      console.log('isLegacyHashMatch:', isLegacyHashMatch);
-      console.log('MATCH RESULT:', isDirectMatch || isLegacyHashMatch);
     }
     process.exit(0);
   } catch (err) {
-    console.error(err);
+    console.error('Test auth error:', err);
     process.exit(1);
   }
 }
