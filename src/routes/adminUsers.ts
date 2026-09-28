@@ -27,7 +27,7 @@ router.use(requireSuperAdmin);
 router.get('/', async (_req: AuthRequest, res: Response): Promise<void> => {
   try {
     const users = await Users.findAll({
-      attributes: ['id', 'email', 'role_id', 'is_active'],
+      attributes: ['id', 'email', 'role_id', 'is_active', 'is_approved', 'is_blocked'],
       include: [{ model: Roles, as: 'role', attributes: ['id', 'name'] }],
       order: [['id', 'ASC']]
     });
@@ -39,7 +39,9 @@ router.get('/', async (_req: AuthRequest, res: Response): Promise<void> => {
         email: u.email,
         role_id: u.role_id,
         role_name: u.role_id === 1 ? 'Super Admin' : 'Admin',
-        is_active: u.is_active
+        is_active: u.is_active,
+        is_approved: u.is_approved ?? 0,
+        is_blocked: u.is_blocked ?? false
       }))
     });
   } catch (error: any) {
@@ -73,7 +75,9 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
       email: cleanEmail,
       password: String(password).trim(),
       role_id: roleId,
-      is_active: true
+      is_active: true,
+      is_approved: 1, // Super admin created users are auto-approved
+      is_blocked: false
     });
 
     res.status(201).json({
@@ -84,7 +88,9 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
         email: newUser.email,
         role_id: newUser.role_id,
         role_name: newUser.role_id === 1 ? 'Super Admin' : 'Admin',
-        is_active: newUser.is_active
+        is_active: newUser.is_active,
+        is_approved: newUser.is_approved,
+        is_blocked: newUser.is_blocked
       }
     });
   } catch (error: any) {
@@ -94,12 +100,12 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
 });
 
 // ============================================================
-// 3. UPDATE ADMIN USER (TOGGLE STATUS / ROLE / PASSWORD)
+// 3. UPDATE ADMIN USER (TOGGLE APPROVAL / BLOCK / STATUS / ROLE / PASSWORD)
 // ============================================================
 router.put('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const userId = parseInt(req.params.id as string, 10);
-    const { is_active, role_id, password } = req.body;
+    const { is_approved, is_blocked, is_active, role_id, password } = req.body;
 
     const user = await Users.findByPk(userId);
     if (!user) {
@@ -108,6 +114,22 @@ router.put('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
     }
 
     const updates: any = {};
+
+    // Validate approval state transitions:
+    // Rule: We can approve (1) or deny (2), can approve denied request (2 -> 1), BUT CANNOT deny an approved request (1 -> 2).
+    if (is_approved !== undefined) {
+      const newApprovedState = Number(is_approved);
+      if (user.is_approved === 1 && newApprovedState === 2) {
+        res.status(400).json({
+          success: false,
+          error: 'An approved admin request cannot be denied. You can block/unblock approved admins instead.'
+        });
+        return;
+      }
+      updates.is_approved = newApprovedState;
+    }
+
+    if (typeof is_blocked === 'boolean') updates.is_blocked = is_blocked;
     if (typeof is_active === 'boolean') updates.is_active = is_active;
     if (role_id !== undefined) updates.role_id = Number(role_id) === 1 ? 1 : 2;
     if (password && String(password).trim() !== '') updates.password = String(password).trim();
@@ -122,7 +144,9 @@ router.put('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
         email: user.email,
         role_id: user.role_id,
         role_name: user.role_id === 1 ? 'Super Admin' : 'Admin',
-        is_active: user.is_active
+        is_active: user.is_active,
+        is_approved: user.is_approved,
+        is_blocked: user.is_blocked
       }
     });
   } catch (error: any) {
@@ -132,33 +156,10 @@ router.put('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
 });
 
 // ============================================================
-// 4. DELETE ADMIN USER
+// 4. DELETE ADMIN USER (DISALLOWED)
 // ============================================================
-router.delete('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const userId = parseInt(req.params.id as string, 10);
-
-    if (req.user?.id === userId) {
-      res.status(400).json({ success: false, error: 'You cannot delete your own admin account.' });
-      return;
-    }
-
-    const user = await Users.findByPk(userId);
-    if (!user) {
-      res.status(404).json({ success: false, error: 'Admin user not found.' });
-      return;
-    }
-
-    await user.destroy();
-
-    res.json({
-      success: true,
-      message: 'Admin user deleted successfully.'
-    });
-  } catch (error: any) {
-    console.error('Error deleting admin user:', error);
-    res.status(500).json({ success: false, error: error.message || 'Failed to delete admin user.' });
-  }
+router.delete('/:id', async (_req: AuthRequest, res: Response): Promise<void> => {
+  res.status(400).json({ success: false, error: 'Deleting admin requests is not allowed.' });
 });
 
 export default router;

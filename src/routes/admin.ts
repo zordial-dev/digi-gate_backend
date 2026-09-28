@@ -3,6 +3,8 @@ import { Organisations, People, Visitors, VisitorVisits } from '../models/index.
 import { Op } from 'sequelize';
 import sequelize from '../config/database.js';
 import { createUpload } from '../middleware/upload.js';
+import { sendOrgApprovalEmail } from '../utils/email.js';
+import crypto from 'crypto';
 
 const router = Router();
 
@@ -287,14 +289,27 @@ router.put('/requests/:id/approve', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Organisation not found' });
     }
 
+    // Generate random password for organisation
+    const randomPassword = 'Org@' + crypto.randomBytes(4).toString('hex').toUpperCase();
+
     await organisation.update({
       is_approved: 1,
       is_active: true,
+      password: randomPassword
     });
+
+    // Send email notification with login details & temporary password
+    if (organisation.email) {
+      await sendOrgApprovalEmail(
+        organisation.email,
+        organisation.name,
+        randomPassword
+      );
+    }
 
     res.json({
       success: true,
-      message: 'Organisation registration approved successfully!',
+      message: 'Organisation registration approved successfully! Credentials sent via email.',
       data: organisation,
     });
   } catch (error) {

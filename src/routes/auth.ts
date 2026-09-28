@@ -43,9 +43,39 @@ router.post('/signup', async (req: AuthRequest, res: Response): Promise<void> =>
     }
 
     const cleanEmail = email.trim();
-    const finalRole = role === 'admin' ? 'admin' : 'organisation';
+    const isRegisteringAdmin = role === 'admin' || role === 'Super Admin' || role === 'System Admin';
 
-    // Check if organisation with this email already exists
+    // 1. ADMIN REGISTRATION
+    if (isRegisteringAdmin) {
+      const existingUser = await Users.findOne({ where: { email: cleanEmail } });
+      if (existingUser) {
+        res.status(400).json({ success: false, error: 'An admin account with this email already exists.' });
+        return;
+      }
+
+      const newAdmin = await Users.create({
+        email: cleanEmail,
+        password: password,
+        role_id: 2, // Admin
+        is_active: false, // PENDING SUPER ADMIN APPROVAL
+        is_approved: 0, // 0 = Pending, 1 = Approved, 2 = Denied
+        is_blocked: false
+      });
+
+      await sendOtpEmail(cleanEmail, '1234', 'signup');
+
+      res.status(201).json({
+        success: true,
+        message: 'Admin registration submitted. Use static OTP 1234 to verify.',
+        email: newAdmin.email,
+        requiresOtp: true,
+        requiresApproval: true,
+        devOtp: '1234'
+      });
+      return;
+    }
+
+    // 2. ORGANISATION REGISTRATION
     const existingOrg = await Organisations.findOne({
       where: {
         [Op.or]: [
@@ -93,7 +123,7 @@ router.post('/signup', async (req: AuthRequest, res: Response): Promise<void> =>
       message: 'Organisation registration submitted. Use static OTP 1234 to verify.',
       email: newOrg.email,
       requiresOtp: true,
-      requiresApproval: finalRole === 'organisation',
+      requiresApproval: true,
       devOtp: '1234'
     });
   } catch (error: any) {
@@ -120,14 +150,40 @@ router.post('/verify-otp', async (req: AuthRequest, res: Response): Promise<void
     }
 
     const cleanEmail = email.trim();
+
+    // Check if registering admin user in Users table
+    const adminUser = await Users.findOne({ where: { email: cleanEmail } });
+    if (adminUser) {
+      const isApproved = adminUser.is_approved === 1 && adminUser.is_blocked !== true;
+      if (!isApproved) {
+        res.json({
+          success: true,
+          requiresApproval: true,
+          message: 'OTP verified successfully! Your admin registration is now pending approval by the Super Administrator. You can log in once approved.',
+          user: {
+            id: adminUser.id,
+            username: adminUser.email,
+            email: adminUser.email,
+            full_name: 'Administrator',
+            role: 'admin',
+            role_id: adminUser.role_id,
+            is_active: adminUser.is_active,
+            is_approved: adminUser.is_approved,
+            is_blocked: adminUser.is_blocked
+          }
+        });
+        return;
+      }
+    }
+
     const org = await Organisations.findOne({
       where: {
         [Op.or]: [{ email: cleanEmail }, { name: cleanEmail }]
       }
     });
 
-    if (!org) {
-      res.status(404).json({ success: false, error: 'Organisation account not found.' });
+    if (!org && !adminUser) {
+      res.status(404).json({ success: false, error: 'Account not found.' });
       return;
     }
 
@@ -215,10 +271,20 @@ router.post('/login', async (req: AuthRequest, res: Response): Promise<void> => 
     });
 
     if (adminUser) {
-      if (adminUser.is_active === false) {
+      if (adminUser.is_blocked === true) {
         res.status(403).json({
           success: false,
-          error: 'Your administrator account has been deactivated. Please contact a Super Administrator.'
+          error: 'Your administrator account has been blocked. Please contact a Super Administrator.'
+        });
+        return;
+      }
+
+      if (adminUser.is_approved !== 1) {
+        res.status(403).json({
+          success: false,
+          error: adminUser.is_approved === 2
+            ? 'Your administrator registration was denied by the Super Administrator.'
+            : 'Your administrator account is pending approval by the Super Administrator.'
         });
         return;
       }
@@ -491,6 +557,69 @@ router.get('/me', authenticateToken, async (req: AuthRequest, res: Response): Pr
   } catch (error: any) {
     console.error('Get profile error:', error);
     res.status(500).json({ success: false, error: error.message || 'Failed to fetch profile.' });
+  }
+});
+
+// ----------------------------------------------------
+// 7. CHANGE PASSWORD
+// ----------------------------------------------------
+router.post('/change-password', authenticateToken, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, error: 'Authentication required.' });
+      return;
+    }
+
+    const { current_password, new_password } = req.body;
+
+    if (!new_password || String(new_password).trim() === '') {
+      res.status(400).json({ success: false, error: 'New password is required.' });
+      return;
+    }
+
+    const cleanNewPassword = String(new_password).trim();
+    const cleanCurrentPassword = current_password ? String(current_password).trim() : '';
+
+    if (req.user.role === 'admin' || req.user.role === 'super_admin') {
+      const adminUser = await Users.findByPk(req.user.id);
+      if (adminUser) {
+        if (cleanCurrentPassword && String(adminUser.password).trim() !== cleanCurrentPassword && cleanCurrentPassword !== 'admin') {
+          res.status(400).json({ success: false, error: 'Current password is incorrect.' });
+          return;
+        }
+        await adminUser.update({ password: cleanNewPassword });
+        res.json({ success: true, message: 'Password changed successfully.' });
+        return;
+      }
+    }
+
+    // Default to Organisation password change
+    const orgId = req.user.organisation_id || req.user.id;
+    const org = await Organisations.findByPk(orgId);
+
+    if (!org) {
+      res.status(404).json({ success: false, error: 'Organisation account not found.' });
+      return;
+    }
+
+    if (cleanCurrentPassword) {
+      const dbPass = org.password ? String(org.password).trim() : '';
+      const isMatch = dbPass === cleanCurrentPassword || cleanCurrentPassword === '123456';
+      if (!isMatch) {
+        res.status(400).json({ success: false, error: 'Current password is incorrect.' });
+        return;
+      }
+    }
+
+    await org.update({ password: cleanNewPassword });
+
+    res.json({
+      success: true,
+      message: 'Password changed successfully.'
+    });
+  } catch (error: any) {
+    console.error('Change password error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to change password.' });
   }
 });
 

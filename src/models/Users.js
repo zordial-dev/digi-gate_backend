@@ -26,6 +26,16 @@ export default function(sequelize) {
       type: DataTypes.BOOLEAN,
       allowNull: false,
       defaultValue: true
+    },
+    is_approved: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0 // 0 = Pending, 1 = Approved, 2 = Denied
+    },
+    is_blocked: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false // false = Unblocked, true = Blocked
     }
   }, {
     tableName: 'users',
