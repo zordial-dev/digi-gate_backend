@@ -5,6 +5,7 @@ const models = initModels(sequelize);
 
 export const {
   Organisations,
+  OrganisationUsers,
   People,
   VisitorVisits,
   Visitors,

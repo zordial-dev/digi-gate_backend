@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { Organisations, People, Visitors, VisitorVisits } from '../models/index.js';
+import { Organisations, OrganisationUsers, People, Visitors, VisitorVisits } from '../models/index.js';
 import { Op } from 'sequelize';
 import sequelize from '../config/database.js';
 import { createUpload } from '../middleware/upload.js';
@@ -181,6 +181,8 @@ router.post('/register', logoUpload.single('logo'), async (req, res) => {
   try {
     const {
       name,
+      email,
+      password,
       address,
       city,
       state,
@@ -212,7 +214,7 @@ router.post('/register', logoUpload.single('logo'), async (req, res) => {
       country: country ? country.trim() : null,
       pincode: pincode ? pincode.trim() : null,
       phone: phone ? phone.trim() : null,
-      email: null,
+      email: email ? String(email).trim() : null,  // stored for admin display & approval
       website: website ? website.trim() : null,
       logo_url: logo_url,
       timezone: timezone && timezone.trim() ? timezone.trim() : 'Asia/Kolkata',
@@ -221,6 +223,8 @@ router.post('/register', logoUpload.single('logo'), async (req, res) => {
       is_active: false,
       is_approved: 0,
     });
+
+    // NOTE: organisation_users (super_admin) is created on admin approval, not here.
 
     res.status(201).json({
       success: true,
@@ -238,6 +242,8 @@ router.post('/', logoUpload.single('logo'), async (req, res) => {
   try {
     const {
       name,
+      email,
+      password,
       address,
       city,
       state,
@@ -269,7 +275,7 @@ router.post('/', logoUpload.single('logo'), async (req, res) => {
       country: country ? country.trim() : null,
       pincode: pincode ? pincode.trim() : null,
       phone: phone ? phone.trim() : null,
-      email: null,
+      email: email ? String(email).trim() : null,  // stored for admin display & approval
       website: website ? website.trim() : null,
       logo_url: logo_url,
       timezone: timezone && timezone.trim() ? timezone.trim() : 'Asia/Kolkata',
@@ -278,6 +284,8 @@ router.post('/', logoUpload.single('logo'), async (req, res) => {
       is_active: false,
       is_approved: 0,
     });
+
+    // NOTE: organisation_users (super_admin) is created on admin approval, not here.
 
     res.status(201).json({
       success: true,

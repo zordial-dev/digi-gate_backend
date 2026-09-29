@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { Op } from 'sequelize';
-import { Organisations, Users } from '../models/index.js';
+import { Organisations, OrganisationUsers, Users } from '../models/index.js';
 import { sendOtpEmail } from '../utils/email.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 
@@ -45,7 +45,7 @@ router.post('/signup', async (req: AuthRequest, res: Response): Promise<void> =>
     const cleanEmail = email.trim();
     const isRegisteringAdmin = role === 'admin' || role === 'Super Admin' || role === 'System Admin';
 
-    // 1. ADMIN REGISTRATION
+    // 1. ADMIN REGISTRATION (portal admin — stays in Users table)
     if (isRegisteringAdmin) {
       const existingUser = await Users.findOne({ where: { email: cleanEmail } });
       if (existingUser) {
@@ -58,7 +58,7 @@ router.post('/signup', async (req: AuthRequest, res: Response): Promise<void> =>
         password: password,
         role_id: 2, // Admin
         is_active: false, // PENDING SUPER ADMIN APPROVAL
-        is_approved: 0, // 0 = Pending, 1 = Approved, 2 = Denied
+        is_approved: 0,   // 0 = Pending, 1 = Approved, 2 = Denied
         is_blocked: false
       });
 
@@ -76,21 +76,26 @@ router.post('/signup', async (req: AuthRequest, res: Response): Promise<void> =>
     }
 
     // 2. ORGANISATION REGISTRATION
-    const existingOrg = await Organisations.findOne({
-      where: {
-        [Op.or]: [
-          { email: cleanEmail },
-          ...(organisation_name ? [{ name: organisation_name.trim() }] : [])
-        ]
-      }
-    });
-
-    if (existingOrg) {
+    // Check for duplicate email in organisation_users
+    const existingOrgUser = await OrganisationUsers.findOne({ where: { email: cleanEmail } });
+    if (existingOrgUser) {
       res.status(400).json({
         success: false,
-        error: 'An organisation account with this email or name already exists.'
+        error: 'An organisation account with this email already exists.'
       });
       return;
+    }
+
+    // Also check for duplicate org name
+    if (organisation_name && organisation_name.trim()) {
+      const existingOrgName = await Organisations.findOne({ where: { name: organisation_name.trim() } });
+      if (existingOrgName) {
+        res.status(400).json({
+          success: false,
+          error: 'An organisation with this name already exists.'
+        });
+        return;
+      }
     }
 
     const orgName = (organisation_name && organisation_name.trim() !== '')
@@ -104,16 +109,18 @@ router.post('/signup', async (req: AuthRequest, res: Response): Promise<void> =>
 
     const orgCode = `${rawCode}_${Math.floor(100 + Math.random() * 900)}`;
 
-    // Create new Organisation directly with password & pending approval (is_active = false, is_approved = 0)
+    // Create the organisation row — store email for admin display & approval flow
     const newOrg = await Organisations.create({
       name: orgName,
       code: orgCode,
       phone: phone || null,
-      email: cleanEmail,
-      password: password,
-      is_active: false, // PENDING ADMIN APPROVAL
+      email: cleanEmail,  // displayed in admin portal; used for approval email
+      is_active: false,   // PENDING ADMIN APPROVAL
       is_approved: 0
     });
+
+    // NOTE: organisation_users (super_admin) row is created when admin approves.
+    // No login credentials exist until then.
 
     // Send OTP Email (logs static 1234)
     await sendOtpEmail(cleanEmail, '1234', 'signup');
@@ -121,7 +128,7 @@ router.post('/signup', async (req: AuthRequest, res: Response): Promise<void> =>
     res.status(201).json({
       success: true,
       message: 'Organisation registration submitted. Use static OTP 1234 to verify.',
-      email: newOrg.email,
+      email: cleanEmail,
       requiresOtp: true,
       requiresApproval: true,
       devOtp: '1234'
@@ -151,7 +158,7 @@ router.post('/verify-otp', async (req: AuthRequest, res: Response): Promise<void
 
     const cleanEmail = email.trim();
 
-    // Check if registering admin user in Users table
+    // Check if it's an admin portal user
     const adminUser = await Users.findOne({ where: { email: cleanEmail } });
     if (adminUser) {
       const isApproved = adminUser.is_approved === 1 && adminUser.is_blocked !== true;
@@ -176,19 +183,21 @@ router.post('/verify-otp', async (req: AuthRequest, res: Response): Promise<void
       }
     }
 
-    const org = await Organisations.findOne({
-      where: {
-        [Op.or]: [{ email: cleanEmail }, { name: cleanEmail }]
-      }
+    // Look up organisation via organisation_users
+    const orgUser = await OrganisationUsers.findOne({
+      where: { email: cleanEmail },
+      include: [{ model: Organisations, as: 'organisation' }]
     });
 
-    if (!org && !adminUser) {
+    if (!orgUser && !adminUser) {
       res.status(404).json({ success: false, error: 'Account not found.' });
       return;
     }
 
+    const org = orgUser?.organisation;
+
     // Check if organisation is approved by admin
-    const isApproved = org.is_active === true && org.is_approved === 1;
+    const isApproved = org?.is_active === true && org?.is_approved === 1;
 
     if (!isApproved) {
       res.json({
@@ -196,12 +205,12 @@ router.post('/verify-otp', async (req: AuthRequest, res: Response): Promise<void
         requiresApproval: true,
         message: 'OTP verified successfully! Your organisation registration is now pending approval by the System Administrator. You can log in once approved.',
         user: {
-          id: org.id,
-          username: org.name,
-          email: org.email,
-          full_name: org.name,
+          id: org?.id,
+          username: org?.name,
+          email: orgUser?.email,
+          full_name: org?.name,
           role: 'organisation',
-          organisation_id: org.id
+          organisation_id: org?.id
         }
       });
       return;
@@ -210,11 +219,12 @@ router.post('/verify-otp', async (req: AuthRequest, res: Response): Promise<void
     // Generate JWT Token if already approved
     const token = jwt.sign(
       {
-        id: org.id,
-        username: org.name,
-        email: org.email,
+        id: orgUser!.id,
+        username: org!.name,
+        email: orgUser!.email,
         role: 'organisation',
-        organisation_id: org.id
+        org_user_role: orgUser!.role,
+        organisation_id: org!.id
       },
       JWT_SECRET,
       { expiresIn: '7d' }
@@ -226,12 +236,13 @@ router.post('/verify-otp', async (req: AuthRequest, res: Response): Promise<void
       message: 'OTP verified successfully.',
       token,
       user: {
-        id: org.id,
-        username: org.name,
-        email: org.email,
-        full_name: org.name,
+        id: orgUser!.id,
+        username: org!.name,
+        email: orgUser!.email,
+        full_name: org!.name,
         role: 'organisation',
-        organisation_id: org.id
+        org_user_role: orgUser!.role,
+        organisation_id: org!.id
       }
     });
   } catch (error: any) {
@@ -263,12 +274,8 @@ router.post('/login', async (req: AuthRequest, res: Response): Promise<void> => 
     const cleanReqEmail = email.trim();
     const cleanReqPassword = String(password).trim();
 
-    // 1. DYNAMIC ADMIN LOGIN CHECK VIA USERS TABLE
-    const adminUser = await Users.findOne({
-      where: {
-        email: cleanReqEmail
-      }
-    });
+    // 1. ADMIN PORTAL LOGIN CHECK VIA USERS TABLE
+    const adminUser = await Users.findOne({ where: { email: cleanReqEmail } });
 
     if (adminUser) {
       if (adminUser.is_blocked === true) {
@@ -355,35 +362,21 @@ router.post('/login', async (req: AuthRequest, res: Response): Promise<void> => 
       }
     }
 
-    // 2. ORGANISATION DIRECT LOGIN CHECK
-    const org = await Organisations.findOne({
-      where: {
-        [Op.or]: [
-          { email: cleanReqEmail },
-          { name: cleanReqEmail }
-        ]
-      }
+    // 2. ORGANISATION LOGIN — look up via organisation_users
+    const orgUser = await OrganisationUsers.findOne({
+      where: { email: cleanReqEmail },
+      include: [{ model: Organisations, as: 'organisation' }]
     });
 
-    if (!org) {
-      res.status(400).json({ success: false, error: 'Invalid credentials. Organisation account does not exist.' });
+    if (!orgUser) {
+      res.status(400).json({ success: false, error: 'Invalid credentials. Account does not exist.' });
       return;
     }
 
-    // Check direct password match
-    const cleanDbPassword = org.password ? String(org.password).trim() : '';
-    const isDirectMatch = cleanReqPassword === cleanDbPassword;
-    const isLegacyHashMatch = org.password && org.password.startsWith('$2')
-      ? await bcrypt.compare(cleanReqPassword, org.password).catch(() => false)
-      : false;
+    const org = orgUser.organisation;
 
-    if (!isDirectMatch && !isLegacyHashMatch && cleanReqPassword !== '123456') {
-      res.status(400).json({ success: false, error: 'Invalid credentials. Password is incorrect.' });
-      return;
-    }
-
-    // Check admin approval for organisation
-    if (org.is_active === false || org.is_approved !== 1) {
+    // Check organisation approval status
+    if (!org || org.is_active === false || org.is_approved !== 1) {
       res.status(403).json({
         success: false,
         error: 'Your organisation account is pending approval by the System Administrator. Please wait for admin approval before logging in.'
@@ -391,13 +384,32 @@ router.post('/login', async (req: AuthRequest, res: Response): Promise<void> => 
       return;
     }
 
+    // Check orgUser is active
+    if (orgUser.is_active === false) {
+      res.status(403).json({ success: false, error: 'Your user account has been deactivated.' });
+      return;
+    }
+
+    // Password check (plain-text or bcrypt hash)
+    const dbPass = orgUser.password ? String(orgUser.password).trim() : '';
+    const isDirectMatch = cleanReqPassword === dbPass;
+    const isLegacyHashMatch = dbPass.startsWith('$2')
+      ? await bcrypt.compare(cleanReqPassword, dbPass).catch(() => false)
+      : false;
+
+    if (!isDirectMatch && !isLegacyHashMatch && cleanReqPassword !== '123456') {
+      res.status(400).json({ success: false, error: 'Invalid credentials. Password is incorrect.' });
+      return;
+    }
+
     // Generate JWT Token
     const token = jwt.sign(
       {
-        id: org.id,
+        id: orgUser.id,
         username: org.name,
-        email: org.email,
+        email: orgUser.email,
         role: 'organisation',
+        org_user_role: orgUser.role,
         organisation_id: org.id
       },
       JWT_SECRET,
@@ -409,11 +421,12 @@ router.post('/login', async (req: AuthRequest, res: Response): Promise<void> => 
       message: 'Login successful.',
       token,
       user: {
-        id: org.id,
+        id: orgUser.id,
         username: org.name,
-        email: org.email,
+        email: orgUser.email,
         full_name: org.name,
         role: 'organisation',
+        org_user_role: orgUser.role,
         organisation_id: org.id,
         organisation_name: org.name
       }
@@ -432,29 +445,27 @@ router.post('/forgot-password', async (req: AuthRequest, res: Response): Promise
     const { email } = req.body;
 
     if (!email) {
-      res.status(400).json({ success: false, error: 'Email or Organisation Name is required.' });
+      res.status(400).json({ success: false, error: 'Email is required.' });
       return;
     }
 
     const cleanEmail = email.trim();
-    const org = await Organisations.findOne({
-      where: {
-        [Op.or]: [{ email: cleanEmail }, { name: cleanEmail }]
-      }
-    });
 
-    if (!org) {
-      res.status(404).json({ success: false, error: 'No organisation account found with that email or name.' });
+    // Look up via organisation_users
+    const orgUser = await OrganisationUsers.findOne({ where: { email: cleanEmail } });
+
+    if (!orgUser) {
+      res.status(404).json({ success: false, error: 'No organisation account found with that email.' });
       return;
     }
 
     // Send OTP email (logs static 1234)
-    await sendOtpEmail(org.email || cleanEmail, '1234', 'forgot_password');
+    await sendOtpEmail(cleanEmail, '1234', 'forgot_password');
 
     res.json({
       success: true,
       message: 'Password reset OTP (1234) sent to your email address.',
-      email: org.email || cleanEmail,
+      email: cleanEmail,
       devOtp: '1234'
     });
   } catch (error: any) {
@@ -464,7 +475,7 @@ router.post('/forgot-password', async (req: AuthRequest, res: Response): Promise
 });
 
 // ----------------------------------------------------
-// 5. RESET PASSWORD (VERIFY OTP & UPDATE DIRECT ORG PASSWORD)
+// 5. RESET PASSWORD (VERIFY OTP & UPDATE ORG USER PASSWORD)
 // ----------------------------------------------------
 router.post('/reset-password', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -481,21 +492,15 @@ router.post('/reset-password', async (req: AuthRequest, res: Response): Promise<
     }
 
     const cleanEmail = email.trim();
-    const org = await Organisations.findOne({
-      where: {
-        [Op.or]: [{ email: cleanEmail }, { name: cleanEmail }]
-      }
-    });
 
-    if (!org) {
+    const orgUser = await OrganisationUsers.findOne({ where: { email: cleanEmail } });
+
+    if (!orgUser) {
       res.status(404).json({ success: false, error: 'Organisation account not found.' });
       return;
     }
 
-    // Save direct plain-text password to Organisations table
-    await org.update({
-      password: new_password
-    });
+    await orgUser.update({ password: new_password });
 
     res.json({
       success: true,
@@ -517,40 +522,55 @@ router.get('/me', authenticateToken, async (req: AuthRequest, res: Response): Pr
       return;
     }
 
-    if (req.user.role === 'admin') {
+    if (req.user.role === 'admin' || req.user.role === 'super_admin') {
+      // Try to get full admin user record
+      const adminUser = await Users.findByPk(req.user.id, {
+        attributes: ['id', 'email', 'role_id', 'is_active', 'is_approved']
+      });
+      const isSuperAdmin = adminUser?.role_id === 1 || req.user.role === 'super_admin';
       res.json({
         success: true,
         user: {
-          id: 1,
-          username: 'admin',
-          email: 'admin@digigate.com',
-          full_name: 'System Administrator',
-          role: 'admin',
+          id: adminUser?.id || req.user.id,
+          username: adminUser?.email || req.user.email,
+          email: adminUser?.email || req.user.email,
+          full_name: isSuperAdmin ? 'Super Administrator' : 'Administrator',
+          role: isSuperAdmin ? 'super_admin' : 'admin',
+          role_id: adminUser?.role_id,
           organisation_id: null
         }
       });
       return;
     }
 
-    const orgId = req.user.organisation_id || req.user.id;
-    const org = await Organisations.findByPk(orgId, {
-      attributes: ['id', 'name', 'code', 'email', 'phone', 'logo_url', 'is_active', 'is_approved']
+    // Organisation user: req.user.id is the organisation_users row id
+    const orgUser = await OrganisationUsers.findByPk(req.user.id, {
+      include: [{
+        model: Organisations,
+        as: 'organisation',
+        attributes: ['id', 'name', 'code', 'phone', 'logo_url', 'is_active', 'is_approved',
+          'address', 'city', 'state', 'country', 'pincode', 'website', 'timezone',
+          'host_available_message', 'host_unavailable_message']
+      }]
     });
 
-    if (!org) {
+    if (!orgUser) {
       res.status(404).json({ success: false, error: 'Organisation profile not found.' });
       return;
     }
 
+    const org = orgUser.organisation;
+
     res.json({
       success: true,
       user: {
-        id: org.id,
-        username: org.name,
-        email: org.email,
-        full_name: org.name,
+        id: orgUser.id,
+        username: org?.name,
+        email: orgUser.email,
+        full_name: org?.name,
         role: 'organisation',
-        organisation_id: org.id,
+        org_user_role: orgUser.role,
+        organisation_id: org?.id,
         organisation: org
       }
     });
@@ -580,6 +600,7 @@ router.post('/change-password', authenticateToken, async (req: AuthRequest, res:
     const cleanNewPassword = String(new_password).trim();
     const cleanCurrentPassword = current_password ? String(current_password).trim() : '';
 
+    // Admin portal users
     if (req.user.role === 'admin' || req.user.role === 'super_admin') {
       const adminUser = await Users.findByPk(req.user.id);
       if (adminUser) {
@@ -593,25 +614,27 @@ router.post('/change-password', authenticateToken, async (req: AuthRequest, res:
       }
     }
 
-    // Default to Organisation password change
-    const orgId = req.user.organisation_id || req.user.id;
-    const org = await Organisations.findByPk(orgId);
+    // Organisation user — req.user.id is organisation_users.id
+    const orgUser = await OrganisationUsers.findByPk(req.user.id);
 
-    if (!org) {
-      res.status(404).json({ success: false, error: 'Organisation account not found.' });
+    if (!orgUser) {
+      res.status(404).json({ success: false, error: 'Organisation user account not found.' });
       return;
     }
 
     if (cleanCurrentPassword) {
-      const dbPass = org.password ? String(org.password).trim() : '';
+      const dbPass = orgUser.password ? String(orgUser.password).trim() : '';
       const isMatch = dbPass === cleanCurrentPassword || cleanCurrentPassword === '123456';
-      if (!isMatch) {
+      const isHashMatch = dbPass.startsWith('$2')
+        ? await bcrypt.compare(cleanCurrentPassword, dbPass).catch(() => false)
+        : false;
+      if (!isMatch && !isHashMatch) {
         res.status(400).json({ success: false, error: 'Current password is incorrect.' });
         return;
       }
     }
 
-    await org.update({ password: cleanNewPassword });
+    await orgUser.update({ password: cleanNewPassword });
 
     res.json({
       success: true,
