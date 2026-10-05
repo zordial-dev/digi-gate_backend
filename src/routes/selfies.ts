@@ -5,7 +5,7 @@ const router = Router();
 const FILENAME_REGEX = /^[a-zA-Z0-9._-]+\.(jpg|jpeg|png|webp)$/;
 
 export const getSelfieHandler = async (req: Request, res: Response): Promise<void> => {
-  const { filename } = req.params;
+  const filename = typeof req.params.filename === 'string' ? req.params.filename : '';
 
   // Validate filename with ^[a-zA-Z0-9._-]+\.(jpg|jpeg|png|webp)$
   if (!filename || !FILENAME_REGEX.test(filename)) {
