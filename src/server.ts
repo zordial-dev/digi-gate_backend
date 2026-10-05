@@ -88,7 +88,7 @@ const startServer = async (): Promise<void> => {
     await sequelize.authenticate();
     console.log('✅ Database connected successfully');
 
-    await sequelize.sync({ alter: true });
+    await sequelize.sync();
     console.log('✅ Database synchronized successfully');
 
   } catch (error) {
