@@ -12,6 +12,8 @@ import adminRoutes from './routes/admin.js';
 import adminUsersRoutes from './routes/adminUsers.js';
 import authRoutes from './routes/auth.js';
 import organisationUsersRoutes from './routes/organisationUsers.js';
+import selfiesRoutes from './routes/selfies.js';
+import visitsRoutes from './routes/visits.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,15 +23,18 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware & Routes Config
+// Middleware & Routes Config (Support up to 10MB for base64 uploads)
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Host ALL static asset directories (/selfies, /public, /logos, etc.)
+// Selfie Database Proxy Routes (raw bytes from PostgreSQL bytea, NO disk access)
+app.use('/selfies', selfiesRoutes);
+app.use('/api/selfies', selfiesRoutes);
+
+// Host static asset directories (/public, /logos, etc. - /selfies is served via DB proxy above)
 const publicDir = path.join(__dirname, '../public');
 app.use('/public', express.static(publicDir));
-app.use('/selfies', express.static(path.join(publicDir, 'selfies')));
 app.use('/logos', express.static(path.join(publicDir, 'logos')));
 app.use('/hosts', express.static(path.join(publicDir, 'hosts')));
 app.use('/profiles', express.static(path.join(publicDir, 'profiles')));
@@ -45,11 +50,16 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/organisation/users', organisationUsersRoutes);
 app.use('/organisation/users', organisationUsersRoutes);
 
+// Visits Routes (POST /visits with selfie_base64 in transaction)
+app.use('/visits', visitsRoutes);
+app.use('/api/visits', visitsRoutes);
+
 // Other API Routes
 app.use('/api/hosts', hostRoutes);
 app.use('/api/organisations', organisationsRoutes);
 app.use('/api/visitors', visitorsRoutes);
 app.use('/api/visitor-visits', visitorVisitsRoutes);
+app.use('/visitor-visits', visitorVisitsRoutes);
 
 // 404 handler
 app.use((_, res) => {

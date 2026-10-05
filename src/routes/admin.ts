@@ -3,8 +3,9 @@ import { Organisations, OrganisationUsers, People } from '../models/index.js';
 import { Op } from 'sequelize';
 import sequelize from '../config/database.js';
 import { createUpload } from '../middleware/upload.js';
-import { sendOrgApprovalEmail } from '../utils/email.js';
+import { sendOrgApprovalEmail, sendOrgRejectionEmail } from '../utils/email.js';
 import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 
 const router = Router();
 
@@ -273,6 +274,9 @@ router.get('/requests', async (req, res) => {
 // ============================================================
 // APPROVE REGISTRATION REQUEST
 // ============================================================
+// ============================================================
+// APPROVE REGISTRATION REQUEST
+// ============================================================
 router.put('/requests/:id/approve', async (req, res) => {
   try {
     const id = parseInt(req.params.id as string);
@@ -285,16 +289,13 @@ router.put('/requests/:id/approve', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Organisation not found' });
     }
 
-    // Generate a temporary password for the super admin
-    const randomPassword = 'Org@' + crypto.randomBytes(4).toString('hex').toUpperCase();
-
     // Mark org as approved & active
     await organisation.update({
       is_approved: 1,
       is_active: true,
+      block_reason: null,
     });
 
-    // Create the super_admin user in organisation_users (idempotent)
     const orgEmail = organisation.email;
     if (orgEmail) {
       const existing = await OrganisationUsers.findOne({
@@ -302,31 +303,31 @@ router.put('/requests/:id/approve', async (req, res) => {
       });
 
       if (!existing) {
+        // Fallback for legacy organisations created without organisation_users row
+        const randomPassword = 'Org@' + crypto.randomBytes(4).toString('hex').toUpperCase();
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(randomPassword, salt);
         await OrganisationUsers.create({
           organisation_id: organisation.id,
           email: orgEmail,
-          password: randomPassword,
+          password: hashedPassword,
           role: 'super_admin',
           is_active: true,
         });
-      } else {
-        // Already exists — just promote to super_admin if not already
-        if (existing.role !== 'super_admin') {
-          await existing.update({ role: 'super_admin' });
-        }
-      }
 
-      // Send approval email with login details
-      await sendOrgApprovalEmail(
-        orgEmail,
-        organisation.name,
-        randomPassword
-      );
+        await sendOrgApprovalEmail(orgEmail, organisation.name, randomPassword);
+      } else {
+        // User created during registration with their own password
+        if (existing.role !== 'super_admin' || !existing.is_active) {
+          await existing.update({ role: 'super_admin', is_active: true });
+        }
+        await sendOrgApprovalEmail(orgEmail, organisation.name);
+      }
     }
 
     res.json({
       success: true,
-      message: 'Organisation approved successfully! Login credentials sent via email.',
+      message: 'Organisation approved successfully! Approval notification sent via email.',
       data: organisation,
     });
   } catch (error) {
@@ -362,9 +363,13 @@ router.put('/requests/:id/hold', async (req, res) => {
       block_reason: message.trim(),
     });
 
+    if (organisation.email) {
+      await sendOrgRejectionEmail(organisation.email, organisation.name, `Application Placed on Hold: ${message.trim()}`);
+    }
+
     res.json({
       success: true,
-      message: 'Organisation registration put on hold.',
+      message: 'Organisation registration put on hold and notification sent.',
       data: organisation,
     });
   } catch (error) {
@@ -400,9 +405,13 @@ router.put('/requests/:id/deny', async (req, res) => {
       block_reason: message.trim(),
     });
 
+    if (organisation.email) {
+      await sendOrgRejectionEmail(organisation.email, organisation.name, message.trim());
+    }
+
     res.json({
       success: true,
-      message: 'Organisation registration denied.',
+      message: 'Organisation registration denied and notification sent.',
       data: organisation,
     });
   } catch (error) {

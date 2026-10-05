@@ -38,7 +38,7 @@ export const sendOtpEmail = async (email: string, otp: string, purpose: 'signup'
       <div style="background-color: #ffffff; padding: 24px; border-radius: 8px; border: 1px solid #e2e8f0;">
         <h3 style="color: #172525; margin-top: 0;">${titleText}</h3>
         <p style="color: #4a5d5c; font-size: 14px; line-height: 1.5;">
-          Your static 4-digit One-Time Password (OTP) for <strong>${email}</strong> is:
+          Your One-Time Password (OTP) for <strong>${email}</strong> is:
         </p>
         <div style="text-align: center; margin: 24px 0;">
           <span style="display: inline-block; font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #035352; background: #F3E8BC; padding: 12px 24px; border-radius: 8px; border: 1px solid #e0d49d;">
@@ -79,14 +79,155 @@ export const sendOtpEmail = async (email: string, otp: string, purpose: 'signup'
   }
 };
 
+export const sendRegistrationReceivedEmail = async (
+  email: string,
+  orgName: string
+): Promise<boolean> => {
+  const subject = 'Registration Request Received - Digi-Gate';
+
+  const htmlContent = `
+    <div style="font-family: Arial, sans-serif; max-width: 550px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #f9fdfd;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h2 style="color: #035352; margin: 0; font-size: 24px; font-weight: bold;">DIGI-GATE</h2>
+        <p style="color: #64748b; font-size: 13px; margin-top: 4px;">Organisation Access & Visitor Management</p>
+      </div>
+      <div style="background-color: #ffffff; padding: 28px; border-radius: 10px; border: 1px solid #cbd5e1; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
+        <h3 style="color: #1e293b; margin-top: 0; font-size: 18px;">Registration Request Received 📋</h3>
+        <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+          Thank you for registering <strong>${orgName}</strong> with Digi-Gate.
+        </p>
+        <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+          Your registration request has been submitted successfully and is currently under review by our Super Administrator team.
+        </p>
+        <div style="background-color: #f0fdf4; border-left: 4px solid #10b981; padding: 14px 18px; margin: 20px 0; border-radius: 6px;">
+          <p style="margin: 0; color: #166534; font-size: 13px; font-weight: 500;">
+            ✓ We have recorded your account credentials. Once your registration is approved, your Organisation Super Admin portal will be activated immediately.
+          </p>
+        </div>
+        <p style="color: #64748b; font-size: 13px; line-height: 1.5;">
+          You will receive an email notification as soon as the verification review is complete.
+        </p>
+      </div>
+      <div style="text-align: center; margin-top: 20px;">
+        <p style="color: #94a3b8; font-size: 12px; margin: 0;">Digi-Gate Access Control System &bull; All rights reserved.</p>
+      </div>
+    </div>
+  `;
+
+  console.log(`\n==================================================`);
+  console.log(`✉️ [REGISTRATION RECEIVED EMAIL] To: ${email} | Org: ${orgName}`);
+  console.log(`==================================================\n`);
+
+  try {
+    const transporter = createTransporter();
+    const fromAddr = process.env.AWS_SES_FROM || process.env.SMTP_FROM || '"DigiLocal Platform" <connexon@zordial.com>';
+
+    if (transporter) {
+      await transporter.sendMail({
+        from: fromAddr,
+        to: email,
+        subject,
+        html: htmlContent,
+      });
+      console.log(`✅ Registration received email sent successfully to ${email}`);
+      return true;
+    } else {
+      console.log(`ℹ️ SMTP not configured. Email logged to console.`);
+      return true;
+    }
+  } catch (error) {
+    console.error(`⚠️ Failed to send registration received email via SMTP to ${email}:`, error);
+    return false;
+  }
+};
+
+export const sendSuperAdminApprovalRequestEmail = async (
+  orgName: string,
+  orgEmail: string,
+  orgPhone?: string
+): Promise<boolean> => {
+  const adminEmail = process.env.SUPERADMIN_EMAIL || 'connexon@zordial.com';
+  const subject = `[Action Required] New Organisation Registration: ${orgName}`;
+
+  const htmlContent = `
+    <div style="font-family: Arial, sans-serif; max-width: 550px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #f8fafc;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h2 style="color: #035352; margin: 0; font-size: 24px; font-weight: bold;">DIGI-GATE SUPER ADMIN</h2>
+        <p style="color: #64748b; font-size: 13px; margin-top: 4px;">Approval & Verification Center</p>
+      </div>
+      <div style="background-color: #ffffff; padding: 28px; border-radius: 10px; border: 1px solid #cbd5e1;">
+        <h3 style="color: #0f172a; margin-top: 0; font-size: 18px;">New Organisation Registration Request 🏢</h3>
+        <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+          A new business has applied to onboard with Digi-Gate and is awaiting your review:
+        </p>
+        <div style="background-color: #f1f5f9; padding: 16px; border-radius: 8px; margin: 16px 0;">
+          <p style="margin: 4px 0; font-size: 14px; color: #1e293b;"><strong>Organisation:</strong> ${orgName}</p>
+          <p style="margin: 4px 0; font-size: 14px; color: #1e293b;"><strong>Business Email:</strong> ${orgEmail}</p>
+          ${orgPhone ? `<p style="margin: 4px 0; font-size: 14px; color: #1e293b;"><strong>Phone:</strong> ${orgPhone}</p>` : ''}
+        </div>
+        <p style="color: #475569; font-size: 13px; line-height: 1.5;">
+          Please log in to your Digi-Gate SuperAdmin dashboard to review, approve, or deny this registration.
+        </p>
+      </div>
+      <div style="text-align: center; margin-top: 20px;">
+        <p style="color: #94a3b8; font-size: 12px; margin: 0;">Digi-Gate Administrator Alerts</p>
+      </div>
+    </div>
+  `;
+
+  console.log(`\n==================================================`);
+  console.log(`🔔 [SUPERADMIN NOTIFICATION] Org: ${orgName} | Email: ${orgEmail}`);
+  console.log(`==================================================\n`);
+
+  try {
+    const transporter = createTransporter();
+    const fromAddr = process.env.AWS_SES_FROM || process.env.SMTP_FROM || '"DigiLocal Platform" <connexon@zordial.com>';
+
+    if (transporter) {
+      await transporter.sendMail({
+        from: fromAddr,
+        to: adminEmail,
+        subject,
+        html: htmlContent,
+      });
+      console.log(`✅ SuperAdmin notification email sent successfully to ${adminEmail}`);
+      return true;
+    } else {
+      console.log(`ℹ️ SMTP not configured. Notification logged to console.`);
+      return true;
+    }
+  } catch (error) {
+    console.error(`⚠️ Failed to send SuperAdmin notification email to ${adminEmail}:`, error);
+    return false;
+  }
+};
+
 export const sendOrgApprovalEmail = async (
   email: string,
   orgName: string,
-  randomPassword: string,
+  randomPassword?: string,
   loginUrl?: string
 ): Promise<boolean> => {
   const targetUrl = loginUrl || process.env.ORG_LOGIN_URL || 'http://localhost:5173/login';
   const subject = 'Your Organisation Account Has Been Approved - DigiGate';
+
+  const credentialSection = randomPassword
+    ? `
+      <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+        You can log in to your Organisation Portal using your registered email and the generated temporary password below:
+      </p>
+      <div style="background-color: #f1f5f9; padding: 16px; border-radius: 8px; border-left: 4px solid #035352; margin: 20px 0;">
+        <p style="margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #64748b; font-weight: bold;">Temporary Password</p>
+        <p style="margin: 6px 0 0 0; font-size: 20px; font-family: monospace; font-weight: bold; color: #035352; letter-spacing: 2px;">
+          ${randomPassword}
+        </p>
+      </div>
+    `
+    : `
+      <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+        You can now log in to your Organisation Portal using your registered business email (<strong>${email}</strong>) and the password you set during registration.
+      </p>
+    `;
 
   const htmlContent = `
     <div style="font-family: Arial, sans-serif; max-width: 550px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #f9fdfd;">
@@ -97,29 +238,13 @@ export const sendOrgApprovalEmail = async (
       <div style="background-color: #ffffff; padding: 28px; border-radius: 10px; border: 1px solid #cbd5e1; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
         <h3 style="color: #1e293b; margin-top: 0; font-size: 18px;">Registration Approved! 🎉</h3>
         <p style="color: #334155; font-size: 14px; line-height: 1.6;">
-          Congratulations! Your organisation <strong>${orgName}</strong> has been approved by the System Administrator.
+          Congratulations! Your organisation <strong>${orgName}</strong> has been approved by the Super Administrator.
         </p>
-        <p style="color: #334155; font-size: 14px; line-height: 1.6;">
-          You can now log in to your Organisation Portal using your registered email and the generated password below:
-        </p>
-
-        <div style="background-color: #f1f5f9; padding: 16px; border-radius: 8px; border-left: 4px solid #035352; margin: 20px 0;">
-          <p style="margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #64748b; font-weight: bold;">Temporary Password</p>
-          <p style="margin: 6px 0 0 0; font-size: 20px; font-family: monospace; font-weight: bold; color: #035352; letter-spacing: 2px;">
-            ${randomPassword}
-          </p>
-        </div>
-
+        ${credentialSection}
         <div style="text-align: center; margin: 28px 0 20px 0;">
           <a href="${targetUrl}" target="_blank" style="display: inline-block; background-color: #035352; color: #ffffff; text-decoration: none; font-weight: bold; font-size: 14px; padding: 12px 28px; border-radius: 8px;">
             Log In to Organisation Portal
           </a>
-        </div>
-
-        <div style="background-color: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 12px 16px; margin-top: 24px;">
-          <p style="margin: 0; color: #92400e; font-size: 13px; line-height: 1.5;">
-            <strong>⚠️ Important Security Note:</strong> Please reset your password once successfully logged in via the Change Password feature in your portal.
-          </p>
         </div>
       </div>
       <div style="text-align: center; margin-top: 20px;">
@@ -129,7 +254,7 @@ export const sendOrgApprovalEmail = async (
   `;
 
   console.log(`\n==================================================`);
-  console.log(`✉️ [APPROVAL EMAIL] To: ${email} | Org: ${orgName} | Password: ${randomPassword}`);
+  console.log(`✉️ [APPROVAL EMAIL] To: ${email} | Org: ${orgName}`);
   console.log(`==================================================\n`);
 
   try {
@@ -146,11 +271,72 @@ export const sendOrgApprovalEmail = async (
       console.log(`✅ Org approval email sent successfully to ${email}`);
       return true;
     } else {
-      console.log(`ℹ️ SMTP not configured. Password printed to console log above.`);
+      console.log(`ℹ️ SMTP not configured. Approval logged to console.`);
       return true;
     }
   } catch (error) {
     console.error(`⚠️ Failed to send org approval email via SMTP to ${email}:`, error);
+    return false;
+  }
+};
+
+export const sendOrgRejectionEmail = async (
+  email: string,
+  orgName: string,
+  reason: string
+): Promise<boolean> => {
+  const subject = `Update on Your Organisation Registration - Digi-Gate`;
+
+  const htmlContent = `
+    <div style="font-family: Arial, sans-serif; max-width: 550px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #fffaf0;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h2 style="color: #991b1b; margin: 0; font-size: 24px; font-weight: bold;">DIGI-GATE</h2>
+        <p style="color: #64748b; font-size: 13px; margin-top: 4px;">Organisation Access & Verification</p>
+      </div>
+      <div style="background-color: #ffffff; padding: 28px; border-radius: 10px; border: 1px solid #fed7aa;">
+        <h3 style="color: #991b1b; margin-top: 0; font-size: 18px;">Registration Request Update</h3>
+        <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+          Thank you for your interest in Digi-Gate. After reviewing your registration for <strong>${orgName}</strong>, we are unable to approve your application at this time.
+        </p>
+        <div style="background-color: #fef2f2; border-left: 4px solid #ef4444; padding: 14px 18px; margin: 20px 0; border-radius: 6px;">
+          <p style="margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #991b1b; font-weight: bold;">Reason for Decision</p>
+          <p style="margin: 6px 0 0 0; color: #b91c1c; font-size: 14px; line-height: 1.5;">
+            ${reason}
+          </p>
+        </div>
+        <p style="color: #64748b; font-size: 13px; line-height: 1.5;">
+          If you have questions or would like to submit additional information, please contact our support team.
+        </p>
+      </div>
+      <div style="text-align: center; margin-top: 20px;">
+        <p style="color: #94a3b8; font-size: 12px; margin: 0;">Digi-Gate Access Control System &bull; All rights reserved.</p>
+      </div>
+    </div>
+  `;
+
+  console.log(`\n==================================================`);
+  console.log(`✉️ [REJECTION EMAIL] To: ${email} | Org: ${orgName} | Reason: ${reason}`);
+  console.log(`==================================================\n`);
+
+  try {
+    const transporter = createTransporter();
+    const fromAddr = process.env.AWS_SES_FROM || process.env.SMTP_FROM || '"DigiLocal Platform" <connexon@zordial.com>';
+
+    if (transporter) {
+      await transporter.sendMail({
+        from: fromAddr,
+        to: email,
+        subject,
+        html: htmlContent,
+      });
+      console.log(`✅ Org rejection email sent successfully to ${email}`);
+      return true;
+    } else {
+      console.log(`ℹ️ SMTP not configured. Rejection logged to console.`);
+      return true;
+    }
+  } catch (error) {
+    console.error(`⚠️ Failed to send org rejection email via SMTP to ${email}:`, error);
     return false;
   }
 };

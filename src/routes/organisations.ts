@@ -1,8 +1,10 @@
 import { Router } from 'express';
+import bcrypt from 'bcryptjs';
 import { Organisations, OrganisationUsers, People, Visitors, VisitorVisits } from '../models/index.js';
 import { Op } from 'sequelize';
 import sequelize from '../config/database.js';
 import { createUpload } from '../middleware/upload.js';
+import { sendRegistrationReceivedEmail, sendSuperAdminApprovalRequestEmail, sendOtpEmail } from '../utils/email.js';
 
 const router = Router();
 
@@ -174,10 +176,92 @@ const logoUpload = createUpload({
   filename: `logo_${Date.now()}`
 });
 
+// Store active registration verification OTPs in-memory (email -> { otp, expiresAt })
+const registrationOtps = new Map<string, { otp: string; expiresAt: number }>();
+
 // ============================================================
-// POST /api/organisations/register - Business registration for new organisation
+// POST /api/organisations/send-verification-otp
 // ============================================================
-router.post('/register', logoUpload.single('logo'), async (req, res) => {
+router.post('/send-verification-otp', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email || !String(email).trim()) {
+      return res.status(400).json({ success: false, error: 'Business email is required.' });
+    }
+
+    const cleanEmail = String(email).trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      return res.status(400).json({ success: false, error: 'Please enter a valid business email address.' });
+    }
+
+    // Check duplicate business email
+    const existingOrgUser = await OrganisationUsers.findOne({ where: { email: cleanEmail } });
+    if (existingOrgUser) {
+      return res.status(400).json({
+        success: false,
+        error: 'An organisation account with this business email already exists.',
+      });
+    }
+
+    // Generate secure 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    registrationOtps.set(cleanEmail, {
+      otp,
+      expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
+    });
+
+    await sendOtpEmail(cleanEmail, otp, 'signup');
+
+    res.json({
+      success: true,
+      message: `Verification code sent to ${cleanEmail}`,
+      email: cleanEmail,
+    });
+  } catch (error: any) {
+    console.error('Send OTP error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to send verification code.' });
+  }
+});
+
+// ============================================================
+// POST /api/organisations/verify-registration-otp
+// ============================================================
+router.post('/verify-registration-otp', async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+    if (!email || !otp) {
+      return res.status(400).json({ success: false, error: 'Email and verification code are required.' });
+    }
+
+    const cleanEmail = String(email).trim().toLowerCase();
+    const cleanOtp = String(otp).trim();
+
+    const record = registrationOtps.get(cleanEmail);
+    const isValid = Boolean(record && record.otp === cleanOtp && record.expiresAt > Date.now());
+
+    if (!isValid) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid or expired verification code. Please check the code or request a new one.',
+      });
+    }
+
+    // Mark as verified
+    registrationOtps.delete(cleanEmail);
+
+    res.json({
+      success: true,
+      message: 'Email verified successfully!',
+    });
+  } catch (error: any) {
+    console.error('Verify OTP error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Verification failed.' });
+  }
+});
+
+// Helper to handle registration logic
+async function handleOrganisationRegistration(req: any, res: any) {
   try {
     const {
       name,
@@ -199,104 +283,99 @@ router.post('/register', logoUpload.single('logo'), async (req, res) => {
       return res.status(400).json({ success: false, error: 'Organisation name is required' });
     }
 
-    const file = (req as any).file;
+    if (!email || !String(email).trim()) {
+      return res.status(400).json({ success: false, error: 'Business email is required' });
+    }
+
+    const cleanEmail = String(email).trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      return res.status(400).json({ success: false, error: 'Please enter a valid business email address' });
+    }
+
+    if (!password || String(password).trim().length < 6) {
+      return res.status(400).json({ success: false, error: 'Password is required and must be at least 6 characters' });
+    }
+
+    // Check duplicate business email
+    const existingOrgUser = await OrganisationUsers.findOne({ where: { email: cleanEmail } });
+    if (existingOrgUser) {
+      return res.status(400).json({
+        success: false,
+        error: 'An organisation account with this business email already exists.',
+      });
+    }
+
+    // Auto-generate unique organisation code
+    const cleanedName = name.trim().replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    const baseCode = cleanedName.length >= 2 ? cleanedName.slice(0, 6) : 'ORG';
+    let orgCode = `${baseCode}_${Math.floor(1000 + Math.random() * 9000)}`;
+    let codeExists = await Organisations.findOne({ where: { code: orgCode } });
+    while (codeExists) {
+      orgCode = `${baseCode}_${Math.floor(1000 + Math.random() * 9000)}`;
+      codeExists = await Organisations.findOne({ where: { code: orgCode } });
+    }
+
+    const file = req.file;
     let logo_url = req.body.logo_url || null;
     if (file) {
       logo_url = `/public/organisations/${file.filename}`;
     }
 
+    // 1. Create Organisation entry
     const newOrg = await Organisations.create({
       name: name.trim(),
-      code: null,
+      code: orgCode,
       address: address ? address.trim() : null,
       city: city ? city.trim() : null,
       state: state ? state.trim() : null,
       country: country ? country.trim() : null,
       pincode: pincode ? pincode.trim() : null,
       phone: phone ? phone.trim() : null,
-      email: email ? String(email).trim() : null,  // stored for admin display & approval
+      email: cleanEmail,
       website: website ? website.trim() : null,
       logo_url: logo_url,
       timezone: timezone && timezone.trim() ? timezone.trim() : 'Asia/Kolkata',
       host_available_message: host_available_message ? host_available_message.trim() : undefined,
       host_unavailable_message: host_unavailable_message ? host_unavailable_message.trim() : undefined,
       is_active: false,
-      is_approved: 0,
+      is_approved: 0, // Pending approval
     });
 
-    // NOTE: organisation_users (super_admin) is created on admin approval, not here.
+    // 2. Create Organisation User entry (role: super_admin, by default is_active = true)
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(String(password).trim(), salt);
+
+    await OrganisationUsers.create({
+      organisation_id: newOrg.id,
+      email: cleanEmail,
+      password: hashedPassword,
+      role: 'super_admin',
+      is_active: true,
+    });
+
+    // 3. Send "request received" email to applicant admin
+    await sendRegistrationReceivedEmail(cleanEmail, newOrg.name);
+
+    // 4. Send approval request email to Major SuperAdmin
+    await sendSuperAdminApprovalRequestEmail(newOrg.name, cleanEmail, newOrg.phone || undefined);
 
     res.status(201).json({
       success: true,
-      message: 'Business registration submitted successfully! Pending administrator approval.',
+      message: 'Organisation registration submitted successfully! A confirmation email has been sent. Your account is pending verification.',
       data: newOrg,
     });
   } catch (error) {
     console.error('Organisation registration error:', error);
     res.status(500).json({ success: false, error: (error as Error).message });
   }
-});
+}
+
+// POST /api/organisations/register - Business registration for new organisation
+router.post('/register', logoUpload.single('logo'), handleOrganisationRegistration);
 
 // Alias: POST /api/organisations
-router.post('/', logoUpload.single('logo'), async (req, res) => {
-  try {
-    const {
-      name,
-      email,
-      password,
-      address,
-      city,
-      state,
-      country,
-      pincode,
-      phone,
-      website,
-      timezone,
-      host_available_message,
-      host_unavailable_message,
-    } = req.body;
-
-    if (!name || !name.trim()) {
-      return res.status(400).json({ success: false, error: 'Organisation name is required' });
-    }
-
-    const file = (req as any).file;
-    let logo_url = req.body.logo_url || null;
-    if (file) {
-      logo_url = `/public/organisations/${file.filename}`;
-    }
-
-    const newOrg = await Organisations.create({
-      name: name.trim(),
-      code: null,
-      address: address ? address.trim() : null,
-      city: city ? city.trim() : null,
-      state: state ? state.trim() : null,
-      country: country ? country.trim() : null,
-      pincode: pincode ? pincode.trim() : null,
-      phone: phone ? phone.trim() : null,
-      email: email ? String(email).trim() : null,  // stored for admin display & approval
-      website: website ? website.trim() : null,
-      logo_url: logo_url,
-      timezone: timezone && timezone.trim() ? timezone.trim() : 'Asia/Kolkata',
-      host_available_message: host_available_message ? host_available_message.trim() : undefined,
-      host_unavailable_message: host_unavailable_message ? host_unavailable_message.trim() : undefined,
-      is_active: false,
-      is_approved: 0,
-    });
-
-    // NOTE: organisation_users (super_admin) is created on admin approval, not here.
-
-    res.status(201).json({
-      success: true,
-      message: 'Business registration submitted successfully! Pending administrator approval.',
-      data: newOrg,
-    });
-  } catch (error) {
-    console.error('Organisation registration error:', error);
-    res.status(500).json({ success: false, error: (error as Error).message });
-  }
-});
+router.post('/', logoUpload.single('logo'), handleOrganisationRegistration);
 
 router.put('/:id', logoUpload.single('logo'), async (req, res) => {
   try {

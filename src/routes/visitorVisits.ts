@@ -1,17 +1,33 @@
 import { Router } from 'express';
+import multer from 'multer';
+import path from 'path';
 import { VisitorVisits, Organisations, People, Visitors } from '../models/index.js';
-import { createUpload } from '../middleware/upload.js';
+import { pool } from '../config/database.js';
 
 const router = Router();
 
-// Create upload instance
-const upload = createUpload({
-  folder: 'selfies',
-  filename: `visitor_${Date.now()}`
+// Memory storage for multer: files are buffered in RAM and NEVER written to disk
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
 });
 
+// Middleware to handle multer 413 file size errors gracefully
+const handleUpload = (req: any, res: any, next: any) => {
+  upload.single('selfie')(req, res, (err: any) => {
+    if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ success: false, error: 'Selfie file exceeds 5 MB limit' });
+    }
+    if (err) {
+      return res.status(400).json({ success: false, error: err.message });
+    }
+    next();
+  });
+};
+
 // POST /api/visitor-visits
-router.post('/', upload.single('selfie'), async (req, res) => {
+router.post('/', handleUpload, async (req, res) => {
+  const client = await pool.connect();
   try {
     const {
       organisation_id,
@@ -20,11 +36,12 @@ router.post('/', upload.single('selfie'), async (req, res) => {
       purpose_of_visit,
       reference,
       otp_verified,
+      selfie_base64,
     } = req.body;
 
     console.log('=== VISIT CREATION REQUEST ===');
     console.log('Body:', req.body);
-    console.log('File:', (req as any).file?.filename);
+    console.log('Memory File:', (req as any).file ? `${(req as any).file.originalname} (${(req as any).file.size} bytes)` : 'None');
 
     // Validation
     if (!visitor_id) {
@@ -86,26 +103,78 @@ router.post('/', upload.single('selfie'), async (req, res) => {
       .replace(/:host/g, hostName)
       .replace(/\{host\}/g, hostName);
 
-    const file = (req as any).file;
-    const selfieUrl = file ? `/selfies/${file.filename}` : null;
+    // Extract image buffer if file or base64 provided
+    let imageBuffer: Buffer | null = null;
+    let mimeType = 'image/jpeg';
+    let ext = 'jpg';
 
-    // Create visit
-    const visit = await VisitorVisits.create({
-      visitor_id: parseInt(visitor_id),
-      organisation_id: parseInt(organisation_id || '0'),
-      host_id: parseInt(host_id),
+    const file = (req as any).file;
+    if (file && file.buffer) {
+      imageBuffer = file.buffer;
+      mimeType = file.mimetype || 'image/jpeg';
+      const rawExt = path.extname(file.originalname).replace('.', '').toLowerCase();
+      ext = rawExt === 'png' ? 'png' : (rawExt === 'webp' ? 'webp' : 'jpg');
+    } else if (selfie_base64 && typeof selfie_base64 === 'string') {
+      const match = selfie_base64.trim().match(/^data:image\/(jpeg|jpg|png|webp);base64,(.+)$/);
+      if (match) {
+        const mimeSub = match[1].toLowerCase();
+        mimeType = mimeSub === 'jpg' ? 'image/jpeg' : `image/${mimeSub}`;
+        ext = (mimeSub === 'jpeg' || mimeSub === 'jpg') ? 'jpg' : mimeSub;
+        imageBuffer = Buffer.from(match[2].replace(/\s/g, ''), 'base64');
+      }
+    }
+
+    let selfieUrl: string | null = null;
+    let filename: string | null = null;
+
+    if (imageBuffer && imageBuffer.length > 0) {
+      if (imageBuffer.length > 5 * 1024 * 1024) {
+        return res.status(413).json({ success: false, error: 'Selfie exceeds 5 MB limit' });
+      }
+      filename = `visitor_${Date.now()}.${ext}`;
+      selfieUrl = `/selfies/${filename}`;
+    }
+
+    // Atomic transaction for database inserts
+    await client.query('BEGIN');
+
+    // Create visit record
+    const visitInsertQuery = `
+      INSERT INTO visitor_visits (
+        visitor_id, organisation_id, host_id, purpose_of_visit, reference,
+        selfie_url, host_available_at_submission, confirmation_message,
+        visit_date, check_in_time
+      ) VALUES (
+        $1, $2, $3, $4, $5,
+        $6, $7, $8,
+        CURRENT_DATE, CURRENT_TIMESTAMP
+      ) RETURNING *;
+    `;
+
+    const visitResult = await client.query(visitInsertQuery, [
+      parseInt(visitor_id),
+      parseInt(organisation_id || '0'),
+      parseInt(host_id),
       purpose_of_visit,
-      reference: reference || null,
-      selfie_url: selfieUrl,
-      otp_verified: otp_verified === 'true',
-      otp_code: null,
-      otp_expires_at: null,
-      otp_attempts: 0,
-      otp_sent_at: new Date(),
-      otp_verified_at: otp_verified === 'true' ? new Date() : null,
-      host_available_at_submission: isHostAvailable,
-      confirmation_message: confirmationMessage,
-    });
+      reference || null,
+      selfieUrl,
+      isHostAvailable,
+      confirmationMessage,
+    ]);
+
+    const visit = visitResult.rows[0];
+
+    // If selfie present, insert bytes into visit_selfies
+    if (filename && imageBuffer) {
+      await client.query(
+        `INSERT INTO visit_selfies (
+           filename, visit_id, data, mime_type, byte_size, uploaded_at
+         ) VALUES ($1, $2, $3, $4, $5, NOW())`,
+        [filename, visit.id, imageBuffer, mimeType, imageBuffer.length]
+      );
+    }
+
+    await client.query('COMMIT');
 
     res.status(201).json({
       success: true,
@@ -118,11 +187,14 @@ router.post('/', upload.single('selfie'), async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('Error:', error);
+    await client.query('ROLLBACK');
+    console.error('Error creating visit:', error);
     res.status(500).json({ 
       success: false, 
       error: (error as Error).message 
     });
+  } finally {
+    client.release();
   }
 });
 

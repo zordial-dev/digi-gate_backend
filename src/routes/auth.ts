@@ -9,10 +9,14 @@ import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'digigate_jwt_secret_key_2026';
 
-// Helper to generate static 4-digit OTP
+// Helper to generate secure random 6-digit OTP
 const generateOtp = (): string => {
-  return '1234';
+  return Math.floor(100000 + Math.random() * 900000).toString();
 };
+
+// In-memory OTP storage with expiration
+const passwordResetOtps = new Map<string, { otp: string; expiresAt: number }>();
+const signupOtps = new Map<string, { otp: string; expiresAt: number }>();
 
 // GET info handler for signup
 router.get('/signup', (_req, res) => {
@@ -53,24 +57,32 @@ router.post('/signup', async (req: AuthRequest, res: Response): Promise<void> =>
         return;
       }
 
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(String(password).trim(), salt);
+
       const newAdmin = await Users.create({
         email: cleanEmail,
-        password: password,
+        password: hashedPassword,
         role_id: 2, // Admin
         is_active: false, // PENDING SUPER ADMIN APPROVAL
         is_approved: 0,   // 0 = Pending, 1 = Approved, 2 = Denied
         is_blocked: false
       });
 
-      await sendOtpEmail(cleanEmail, '1234', 'signup');
+      const otp = generateOtp();
+      signupOtps.set(cleanEmail.toLowerCase(), {
+        otp,
+        expiresAt: Date.now() + 10 * 60 * 1000
+      });
+
+      await sendOtpEmail(cleanEmail, otp, 'signup');
 
       res.status(201).json({
         success: true,
-        message: 'Admin registration submitted. Use static OTP 1234 to verify.',
+        message: 'Admin registration submitted. A verification OTP has been sent to your email.',
         email: newAdmin.email,
         requiresOtp: true,
-        requiresApproval: true,
-        devOtp: '1234'
+        requiresApproval: true
       });
       return;
     }
@@ -119,19 +131,32 @@ router.post('/signup', async (req: AuthRequest, res: Response): Promise<void> =>
       is_approved: 0
     });
 
-    // NOTE: organisation_users (super_admin) row is created when admin approves.
-    // No login credentials exist until then.
+    // Create Organisation User entry (role: super_admin, by default is_active = true)
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(String(password).trim(), salt);
 
-    // Send OTP Email (logs static 1234)
-    await sendOtpEmail(cleanEmail, '1234', 'signup');
+    await OrganisationUsers.create({
+      organisation_id: newOrg.id,
+      email: cleanEmail,
+      password: hashedPassword,
+      role: 'super_admin',
+      is_active: true,
+    });
+
+    const otp = generateOtp();
+    signupOtps.set(cleanEmail.toLowerCase(), {
+      otp,
+      expiresAt: Date.now() + 10 * 60 * 1000
+    });
+
+    await sendOtpEmail(cleanEmail, otp, 'signup');
 
     res.status(201).json({
       success: true,
-      message: 'Organisation registration submitted. Use static OTP 1234 to verify.',
+      message: 'Organisation registration submitted. A verification OTP has been sent to your email.',
       email: cleanEmail,
       requiresOtp: true,
-      requiresApproval: true,
-      devOtp: '1234'
+      requiresApproval: true
     });
   } catch (error: any) {
     console.error('Signup error:', error);
@@ -151,12 +176,16 @@ router.post('/verify-otp', async (req: AuthRequest, res: Response): Promise<void
       return;
     }
 
-    if (otp.trim() !== '1234') {
-      res.status(400).json({ success: false, error: 'Invalid OTP code. Please enter 1234.' });
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanOtp = String(otp).trim();
+
+    const storedOtpData = signupOtps.get(cleanEmail);
+    if (!storedOtpData || storedOtpData.otp !== cleanOtp || Date.now() > storedOtpData.expiresAt) {
+      res.status(400).json({ success: false, error: 'Invalid or expired OTP code. Please enter the code sent to your email.' });
       return;
     }
 
-    const cleanEmail = email.trim();
+    signupOtps.delete(cleanEmail);
 
     // Check if it's an admin portal user
     const adminUser = await Users.findOne({ where: { email: cleanEmail } });
@@ -296,7 +325,12 @@ router.post('/login', async (req: AuthRequest, res: Response): Promise<void> => 
         return;
       }
 
-      const isPasswordValid = cleanReqPassword === String(adminUser.password).trim() || cleanReqPassword === 'admin' || cleanReqPassword === '123456';
+      const dbAdminPass = String(adminUser.password || '').trim();
+      const isPasswordValid =
+        cleanReqPassword === dbAdminPass ||
+        (dbAdminPass.startsWith('$2') ? await bcrypt.compare(cleanReqPassword, dbAdminPass).catch(() => false) : false) ||
+        cleanReqPassword === 'admin' ||
+        cleanReqPassword === '123456';
       if (!isPasswordValid) {
         res.status(400).json({ success: false, error: 'Invalid credentials. Incorrect password.' });
         return;
@@ -373,22 +407,7 @@ router.post('/login', async (req: AuthRequest, res: Response): Promise<void> => 
       return;
     }
 
-    const org = orgUser.organisation;
-
-    // Check organisation approval status
-    if (!org || org.is_active === false || org.is_approved !== 1) {
-      res.status(403).json({
-        success: false,
-        error: 'Your organisation account is pending approval by the System Administrator. Please wait for admin approval before logging in.'
-      });
-      return;
-    }
-
-    // Check orgUser is active
-    if (orgUser.is_active === false) {
-      res.status(403).json({ success: false, error: 'Your user account has been deactivated.' });
-      return;
-    }
+    const org = (orgUser as any).organisation;
 
     // Password check (plain-text or bcrypt hash)
     const dbPass = orgUser.password ? String(orgUser.password).trim() : '';
@@ -402,15 +421,15 @@ router.post('/login', async (req: AuthRequest, res: Response): Promise<void> => 
       return;
     }
 
-    // Generate JWT Token
+    // Generate JWT Token (Login allowed in any state; Portal renders based on approval status)
     const token = jwt.sign(
       {
         id: orgUser.id,
-        username: org.name,
+        username: org?.name || orgUser.email,
         email: orgUser.email,
         role: 'organisation',
         org_user_role: orgUser.role,
-        organisation_id: org.id
+        organisation_id: org?.id
       },
       JWT_SECRET,
       { expiresIn: '7d' }
@@ -422,13 +441,17 @@ router.post('/login', async (req: AuthRequest, res: Response): Promise<void> => 
       token,
       user: {
         id: orgUser.id,
-        username: org.name,
+        username: org?.name || orgUser.email,
         email: orgUser.email,
-        full_name: org.name,
+        full_name: org?.name || orgUser.email,
         role: 'organisation',
         org_user_role: orgUser.role,
-        organisation_id: org.id,
-        organisation_name: org.name
+        organisation_id: org?.id,
+        organisation_name: org?.name,
+        is_active: org?.is_active ?? false,
+        is_approved: org?.is_approved ?? 0,
+        block_reason: org?.block_reason || null,
+        organisation: org
       }
     });
   } catch (error: any) {
@@ -438,7 +461,7 @@ router.post('/login', async (req: AuthRequest, res: Response): Promise<void> => 
 });
 
 // ----------------------------------------------------
-// 4. FORGOT PASSWORD (STATIC OTP 1234)
+// 4. FORGOT PASSWORD (REAL OTP SENT TO EMAIL)
 // ----------------------------------------------------
 router.post('/forgot-password', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -449,24 +472,29 @@ router.post('/forgot-password', async (req: AuthRequest, res: Response): Promise
       return;
     }
 
-    const cleanEmail = email.trim();
+    const cleanEmail = String(email).trim().toLowerCase();
 
-    // Look up via organisation_users
+    // Look up via organisation_users OR admin Users
     const orgUser = await OrganisationUsers.findOne({ where: { email: cleanEmail } });
+    const adminUser = !orgUser ? await Users.findOne({ where: { email: cleanEmail } }) : null;
 
-    if (!orgUser) {
-      res.status(404).json({ success: false, error: 'No organisation account found with that email.' });
+    if (!orgUser && !adminUser) {
+      res.status(404).json({ success: false, error: 'No account found with that email address.' });
       return;
     }
 
-    // Send OTP email (logs static 1234)
-    await sendOtpEmail(cleanEmail, '1234', 'forgot_password');
+    const otp = generateOtp();
+    passwordResetOtps.set(cleanEmail, {
+      otp,
+      expiresAt: Date.now() + 10 * 60 * 1000 // 10 minutes
+    });
+
+    await sendOtpEmail(cleanEmail, otp, 'forgot_password');
 
     res.json({
       success: true,
-      message: 'Password reset OTP (1234) sent to your email address.',
-      email: cleanEmail,
-      devOtp: '1234'
+      message: 'Password reset OTP has been sent to your email address.',
+      email: cleanEmail
     });
   } catch (error: any) {
     console.error('Forgot Password error:', error);
@@ -475,7 +503,7 @@ router.post('/forgot-password', async (req: AuthRequest, res: Response): Promise
 });
 
 // ----------------------------------------------------
-// 5. RESET PASSWORD (VERIFY OTP & UPDATE ORG USER PASSWORD)
+// 5. RESET PASSWORD (VERIFY REAL OTP & UPDATE USER PASSWORD)
 // ----------------------------------------------------
 router.post('/reset-password', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -486,21 +514,45 @@ router.post('/reset-password', async (req: AuthRequest, res: Response): Promise<
       return;
     }
 
-    if (otp.trim() !== '1234') {
-      res.status(400).json({ success: false, error: 'Invalid OTP code. Please enter 1234.' });
+    const cleanEmail = String(email).trim().toLowerCase();
+    const cleanOtp = String(otp).trim();
+
+    const storedOtpData = passwordResetOtps.get(cleanEmail);
+
+    if (!storedOtpData) {
+      res.status(400).json({ success: false, error: 'No OTP request found for this email. Please request a new OTP.' });
       return;
     }
 
-    const cleanEmail = email.trim();
+    if (Date.now() > storedOtpData.expiresAt) {
+      passwordResetOtps.delete(cleanEmail);
+      res.status(400).json({ success: false, error: 'OTP has expired. Please request a new OTP.' });
+      return;
+    }
+
+    if (storedOtpData.otp !== cleanOtp) {
+      res.status(400).json({ success: false, error: 'Invalid OTP code. Please enter the code sent to your email.' });
+      return;
+    }
+
+    // Hash the new password with bcrypt
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(String(new_password).trim(), salt);
 
     const orgUser = await OrganisationUsers.findOne({ where: { email: cleanEmail } });
-
-    if (!orgUser) {
-      res.status(404).json({ success: false, error: 'Organisation account not found.' });
-      return;
+    if (orgUser) {
+      await orgUser.update({ password: hashedPassword });
+    } else {
+      const adminUser = await Users.findOne({ where: { email: cleanEmail } });
+      if (adminUser) {
+        await adminUser.update({ password: hashedPassword });
+      } else {
+        res.status(404).json({ success: false, error: 'Account not found.' });
+        return;
+      }
     }
 
-    await orgUser.update({ password: new_password });
+    passwordResetOtps.delete(cleanEmail);
 
     res.json({
       success: true,
@@ -548,9 +600,11 @@ router.get('/me', authenticateToken, async (req: AuthRequest, res: Response): Pr
       include: [{
         model: Organisations,
         as: 'organisation',
-        attributes: ['id', 'name', 'code', 'phone', 'logo_url', 'is_active', 'is_approved',
-          'address', 'city', 'state', 'country', 'pincode', 'website', 'timezone',
-          'host_available_message', 'host_unavailable_message']
+        attributes: [
+          'id', 'name', 'code', 'phone', 'email', 'logo_url', 'is_active', 'is_approved',
+          'block_reason', 'address', 'city', 'state', 'country', 'pincode', 'website',
+          'timezone', 'host_available_message', 'host_unavailable_message'
+        ]
       }]
     });
 
@@ -565,12 +619,16 @@ router.get('/me', authenticateToken, async (req: AuthRequest, res: Response): Pr
       success: true,
       user: {
         id: orgUser.id,
-        username: org?.name,
+        username: org?.name || orgUser.email,
         email: orgUser.email,
-        full_name: org?.name,
+        full_name: org?.name || orgUser.email,
         role: 'organisation',
         org_user_role: orgUser.role,
         organisation_id: org?.id,
+        organisation_name: org?.name,
+        is_active: org?.is_active ?? false,
+        is_approved: org?.is_approved ?? 0,
+        block_reason: org?.block_reason || null,
         organisation: org
       }
     });
