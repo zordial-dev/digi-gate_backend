@@ -50,7 +50,10 @@ router.get('/code/:code', async (req, res) => {
       include: {
         model: People,
         as: 'people',
-        where: { is_active: true },
+        where: {
+          is_active: true,
+          [Op.or]: [{ is_blocked: false }, { is_blocked: null }],
+        },
         attributes: ['id', 'full_name', 'designation', 'email', 'profile_pic', 'is_available', 'unavailable_dates'],
         required: false,
       },
@@ -127,7 +130,10 @@ router.get('/:id', async (req, res) => {
       include: {
         model: People,
         as: 'people',
-        where: { is_active: true },
+        where: {
+          is_active: true,
+          [Op.or]: [{ is_blocked: false }, { is_blocked: null }],
+        },
         attributes: ['id', 'full_name', 'designation', 'email', 'profile_pic', 'is_available', 'unavailable_dates'],
         required: false,
       },
@@ -506,7 +512,7 @@ router.get('/:id/hosts', async (req, res) => {
 
     const hosts = await People.findAll({
       where,
-      attributes: ['id', 'full_name', 'email', 'mobile_number', 'designation', 'department', 'profile_pic', 'is_available', 'unavailable_dates', 'is_active'],
+      attributes: ['id', 'full_name', 'email', 'mobile_number', 'designation', 'department', 'profile_pic', 'is_available', 'unavailable_dates', 'is_active', 'is_blocked', 'password'],
       order: [['full_name', 'ASC']],
     });
 

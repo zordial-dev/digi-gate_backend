@@ -64,6 +64,15 @@ export default function(sequelize) {
       type: DataTypes.BOOLEAN,
       allowNull: true,
       defaultValue: true
+    },
+    password: {
+      type: DataTypes.STRING(200),
+      allowNull: true
+    },
+    is_blocked: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false
     }
   }, {
     tableName: 'people',

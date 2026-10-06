@@ -38,6 +38,14 @@ router.post('/', profileUpload.single('profile_pic'), async (req, res) => {
     if (typeof data.unavailable_dates === 'string') {
       try { data.unavailable_dates = JSON.parse(data.unavailable_dates); } catch (_) {}
     }
+    if (data.password !== undefined && data.password !== null && String(data.password).trim() !== '') {
+      data.password = String(data.password).trim();
+    } else {
+      delete data.password;
+    }
+    if (data.is_blocked !== undefined) {
+      data.is_blocked = data.is_blocked === true || data.is_blocked === 'true';
+    }
     const host = await People.create(data);
     res.status(201).json({ success: true, data: host });
   } catch (error) {
@@ -64,6 +72,14 @@ router.put('/:id', profileUpload.single('profile_pic'), async (req, res) => {
     }
     if (typeof data.unavailable_dates === 'string') {
       try { data.unavailable_dates = JSON.parse(data.unavailable_dates); } catch (_) {}
+    }
+    if (data.password !== undefined && data.password !== null && String(data.password).trim() !== '') {
+      data.password = String(data.password).trim();
+    } else {
+      delete data.password;
+    }
+    if (data.is_blocked !== undefined) {
+      data.is_blocked = data.is_blocked === true || data.is_blocked === 'true';
     }
     
     await host.update(data);
@@ -136,6 +152,58 @@ router.patch('/:id/unavailable-dates', async (req, res) => {
     res.json({ success: true, data: host });
   } catch (error) {
     console.error('Error updating unavailable dates:', error);
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+// ============================================================
+// PATCH /api/hosts/:id/toggle-block - Block / Unblock host
+// ============================================================
+router.patch('/:id/toggle-block', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id as string);
+    const host = await People.findByPk(id);
+    if (!host) {
+      return res.status(404).json({ success: false, error: 'Host not found' });
+    }
+
+    const newBlockedState = !(host.is_blocked || false);
+    await host.update({ is_blocked: newBlockedState });
+    res.json({
+      success: true,
+      data: host,
+      message: `Host ${newBlockedState ? 'blocked' : 'unblocked'} successfully`,
+    });
+  } catch (error) {
+    console.error('Error toggling host block status:', error);
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+// ============================================================
+// PATCH /api/hosts/:id/password - Change host password
+// ============================================================
+router.patch('/:id/password', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id as string);
+    const host = await People.findByPk(id);
+    if (!host) {
+      return res.status(404).json({ success: false, error: 'Host not found' });
+    }
+
+    const { password } = req.body;
+    if (!password || !String(password).trim()) {
+      return res.status(400).json({ success: false, error: 'Password is required' });
+    }
+
+    await host.update({ password: String(password).trim() });
+    res.json({
+      success: true,
+      data: host,
+      message: 'Host password updated successfully',
+    });
+  } catch (error) {
+    console.error('Error changing host password:', error);
     res.status(500).json({ success: false, error: (error as Error).message });
   }
 });

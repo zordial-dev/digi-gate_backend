@@ -69,14 +69,14 @@ app.use((_, res) => {
 // Global error handler
 app.use((err: Error, _req: any, res: any, _next: any) => {
   console.error('Global error:', err);
-  res.status(500).json({ 
-    success: false, 
-    error: err.message || 'Internal server error' 
+  res.status(500).json({
+    success: false,
+    error: err.message || 'Internal server error'
   });
 });
 
 // Keep-alive timer to prevent Node event loop from closing prematurely
-setInterval(() => {}, 1000 * 60 * 60);
+setInterval(() => { }, 1000 * 60 * 60);
 
 // Start server
 const startServer = async (): Promise<void> => {
@@ -87,6 +87,7 @@ const startServer = async (): Promise<void> => {
 
     await sequelize.authenticate();
     console.log('✅ Database connected successfully');
+
 
     await sequelize.sync();
     console.log('✅ Database synchronized successfully');
