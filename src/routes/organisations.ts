@@ -211,16 +211,41 @@ router.post('/send-verification-otp', async (req, res) => {
       expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
     });
 
-    await sendOtpEmail(cleanEmail, otp, 'signup');
+    const emailResult = await sendOtpEmail(cleanEmail, otp, 'signup');
+
+    if (!emailResult.success) {
+      console.warn(`[send-verification-otp] Email delivery failed for ${cleanEmail}:`, emailResult);
+      return res.status(400).json({
+        success: false,
+        error: `Email was not sent. ${emailResult.error || 'SMTP delivery failed.'}`,
+        emailServiceOutput: emailResult.output || {
+          status: 'FAILED',
+          message: emailResult.error,
+        },
+        email: cleanEmail,
+      });
+    }
 
     res.json({
       success: true,
       message: `Verification code sent to ${cleanEmail}`,
       email: cleanEmail,
+      emailServiceOutput: emailResult.output || {
+        status: 'SENT',
+        messageId: emailResult.messageId,
+        response: emailResult.response,
+      },
     });
   } catch (error: any) {
     console.error('Send OTP error:', error);
-    res.status(500).json({ success: false, error: error.message || 'Failed to send verification code.' });
+    res.status(500).json({
+      success: false,
+      error: `Email was not sent. ${error.message || 'Failed to send verification code.'}`,
+      emailServiceOutput: {
+        status: 'ERROR',
+        message: error.message,
+      },
+    });
   }
 });
 

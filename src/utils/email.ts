@@ -20,7 +20,19 @@ const createTransporter = () => {
   return null;
 };
 
-export const sendOtpEmail = async (email: string, otp: string, purpose: 'signup' | 'forgot_password'): Promise<boolean> => {
+export interface EmailSendResult {
+  success: boolean;
+  messageId?: string;
+  response?: string;
+  error?: string;
+  output?: any;
+}
+
+export const sendOtpEmail = async (
+  email: string,
+  otp: string,
+  purpose: 'signup' | 'forgot_password'
+): Promise<EmailSendResult> => {
   const subject = purpose === 'signup' 
     ? 'Digi-Gate Verification OTP' 
     : 'Digi-Gate Password Reset OTP';
@@ -58,24 +70,58 @@ export const sendOtpEmail = async (email: string, otp: string, purpose: 'signup'
 
   try {
     const transporter = createTransporter();
-    const fromAddr = process.env.AWS_SES_FROM || process.env.SMTP_FROM || '"DigiLocal Platform" <connexon@zordial.com>';
+    let fromAddr = process.env.AWS_SES_FROM || process.env.SMTP_FROM || '"DigiGate Platform" <connexon@zordial.com>';
 
-    if (transporter) {
-      await transporter.sendMail({
-        from: fromAddr,
-        to: email,
-        subject,
-        html: htmlContent,
-      });
-      console.log(`✅ OTP email sent successfully to ${email}`);
-      return true;
-    } else {
-      console.log(`ℹ️ SMTP not configured. OTP printed to console log above.`);
-      return true;
+    if (!transporter) {
+      const errorMsg = 'SMTP not configured on the server. Please check SMTP_HOST, AWS_SMTP_USERNAME, and AWS_SMTP_PASSWORD.';
+      console.warn(`⚠️ [sendOtpEmail] ${errorMsg}`);
+      return {
+        success: false,
+        error: errorMsg,
+        output: {
+          status: 'NOT_CONFIGURED',
+          message: errorMsg,
+          host: process.env.SMTP_HOST || null,
+          port: process.env.SMTP_PORT || null,
+        },
+      };
     }
-  } catch (error) {
-    console.error(`⚠️ Failed to send OTP email via SMTP to ${email}:`, error);
-    return true;
+
+    const info = await transporter.sendMail({
+      from: fromAddr,
+      to: email,
+      subject,
+      html: htmlContent,
+    });
+
+    console.log(`✅ OTP email sent successfully to ${email}. MessageId: ${info.messageId}, Response: ${info.response}`);
+    return {
+      success: true,
+      messageId: info.messageId,
+      response: info.response,
+      output: {
+        status: 'SENT',
+        messageId: info.messageId,
+        response: info.response,
+        accepted: info.accepted,
+        rejected: info.rejected,
+      },
+    };
+  } catch (error: any) {
+    console.error(`❌ Failed to send OTP email via SMTP to ${email}:`, error);
+    const serviceErrorOutput = {
+      status: 'FAILED',
+      message: error?.message || 'SMTP delivery failed',
+      code: error?.code,
+      command: error?.command,
+      response: error?.response,
+      responseCode: error?.responseCode,
+    };
+    return {
+      success: false,
+      error: error?.message || 'Failed to send OTP email via SMTP service',
+      output: serviceErrorOutput,
+    };
   }
 };
 
