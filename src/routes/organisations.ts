@@ -217,10 +217,11 @@ router.post('/send-verification-otp', async (req, res) => {
       console.warn(`[send-verification-otp] Email delivery failed for ${cleanEmail}:`, emailResult);
       return res.status(400).json({
         success: false,
-        error: `Email was not sent. ${emailResult.error || 'SMTP delivery failed.'}`,
+        error: 'Mail was not sent.',
         emailServiceOutput: emailResult.output || {
           status: 'FAILED',
           message: emailResult.error,
+          docsUrl: 'https://docs.aws.amazon.com/ses/latest/APIReference-V2/CommonErrors.html',
         },
         email: cleanEmail,
       });
@@ -240,10 +241,11 @@ router.post('/send-verification-otp', async (req, res) => {
     console.error('Send OTP error:', error);
     res.status(500).json({
       success: false,
-      error: `Email was not sent. ${error.message || 'Failed to send verification code.'}`,
+      error: 'Mail was not sent.',
       emailServiceOutput: {
         status: 'ERROR',
         message: error.message,
+        docsUrl: 'https://docs.aws.amazon.com/ses/latest/APIReference-V2/CommonErrors.html',
       },
     });
   }

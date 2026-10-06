@@ -28,6 +28,41 @@ export interface EmailSendResult {
   output?: any;
 }
 
+export const AWS_SES_COMMON_ERRORS: Record<string, { description: string; httpStatus: number }> = {
+  AccountSuspendedException: {
+    description: "The message can't be sent because the account's ability to send email has been permanently restricted.",
+    httpStatus: 400,
+  },
+  BadRequestException: {
+    description: "The input you provided is invalid.",
+    httpStatus: 400,
+  },
+  LimitExceededException: {
+    description: "There are too many instances of the specified resource type.",
+    httpStatus: 400,
+  },
+  MailFromDomainNotVerifiedException: {
+    description: "The message can't be sent because the sending domain isn't verified.",
+    httpStatus: 400,
+  },
+  MessageRejected: {
+    description: "The message can't be sent because it contains invalid content.",
+    httpStatus: 400,
+  },
+  NotFoundException: {
+    description: "The resource you attempted to access doesn't exist.",
+    httpStatus: 404,
+  },
+  SendingPausedException: {
+    description: "The message can't be sent because the account's ability to send email is currently paused.",
+    httpStatus: 400,
+  },
+  TooManyRequestsException: {
+    description: "Too many requests have been made to the operation.",
+    httpStatus: 429,
+  },
+};
+
 export const sendOtpEmail = async (
   email: string,
   otp: string,
@@ -83,6 +118,7 @@ export const sendOtpEmail = async (
           message: errorMsg,
           host: process.env.SMTP_HOST || null,
           port: process.env.SMTP_PORT || null,
+          docsUrl: 'https://docs.aws.amazon.com/ses/latest/APIReference-V2/CommonErrors.html',
         },
       };
     }
@@ -109,17 +145,34 @@ export const sendOtpEmail = async (
     };
   } catch (error: any) {
     console.error(`❌ Failed to send OTP email via SMTP to ${email}:`, error);
+
+    const rawMsg = `${error?.message || ''} ${error?.response || ''}`;
+    let matchedErrorType: string | null = null;
+    let matchedDetails: { description: string; httpStatus: number } | null = null;
+
+    for (const [errType, details] of Object.entries(AWS_SES_COMMON_ERRORS)) {
+      if (rawMsg.toLowerCase().includes(errType.toLowerCase())) {
+        matchedErrorType = errType;
+        matchedDetails = details;
+        break;
+      }
+    }
+
     const serviceErrorOutput = {
       status: 'FAILED',
       message: error?.message || 'SMTP delivery failed',
+      errorType: matchedErrorType || (error?.code ? `SMTP_${error.code}` : 'DeliveryError'),
+      description: matchedDetails?.description || error?.message || 'SMTP delivery failed',
+      httpStatusCode: matchedDetails?.httpStatus || 400,
       code: error?.code,
       command: error?.command,
       response: error?.response,
       responseCode: error?.responseCode,
+      docsUrl: 'https://docs.aws.amazon.com/ses/latest/APIReference-V2/CommonErrors.html',
     };
     return {
       success: false,
-      error: error?.message || 'Failed to send OTP email via SMTP service',
+      error: matchedDetails?.description || error?.message || 'Failed to send OTP email via SMTP service',
       output: serviceErrorOutput,
     };
   }
