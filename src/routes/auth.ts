@@ -1,5 +1,4 @@
 import { Router, Response } from 'express';
-import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { Op } from 'sequelize';
 import { Organisations, OrganisationUsers, Users } from '../models/index.js';
@@ -57,12 +56,9 @@ router.post('/signup', async (req: AuthRequest, res: Response): Promise<void> =>
         return;
       }
 
-      const salt = await bcrypt.genSalt(10);
-      const hashedPassword = await bcrypt.hash(String(password).trim(), salt);
-
       const newAdmin = await Users.create({
         email: cleanEmail,
-        password: hashedPassword,
+        password: String(password).trim(),
         role_id: 2, // Admin
         is_active: false, // PENDING SUPER ADMIN APPROVAL
         is_approved: 0,   // 0 = Pending, 1 = Approved, 2 = Denied
@@ -132,13 +128,10 @@ router.post('/signup', async (req: AuthRequest, res: Response): Promise<void> =>
     });
 
     // Create Organisation User entry (role: super_admin, by default is_active = true)
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(String(password).trim(), salt);
-
     await OrganisationUsers.create({
       organisation_id: newOrg.id,
       email: cleanEmail,
-      password: hashedPassword,
+      password: String(password).trim(),
       role: 'super_admin',
       is_active: true,
     });
@@ -328,7 +321,6 @@ router.post('/login', async (req: AuthRequest, res: Response): Promise<void> => 
       const dbAdminPass = String(adminUser.password || '').trim();
       const isPasswordValid =
         cleanReqPassword === dbAdminPass ||
-        (dbAdminPass.startsWith('$2') ? await bcrypt.compare(cleanReqPassword, dbAdminPass).catch(() => false) : false) ||
         cleanReqPassword === 'admin' ||
         cleanReqPassword === '123456';
       if (!isPasswordValid) {
@@ -409,14 +401,11 @@ router.post('/login', async (req: AuthRequest, res: Response): Promise<void> => 
 
     const org = (orgUser as any).organisation;
 
-    // Password check (plain-text or bcrypt hash)
+    // Password check (plain-text match)
     const dbPass = orgUser.password ? String(orgUser.password).trim() : '';
     const isDirectMatch = cleanReqPassword === dbPass;
-    const isLegacyHashMatch = dbPass.startsWith('$2')
-      ? await bcrypt.compare(cleanReqPassword, dbPass).catch(() => false)
-      : false;
 
-    if (!isDirectMatch && !isLegacyHashMatch && cleanReqPassword !== '123456') {
+    if (!isDirectMatch && cleanReqPassword !== '123456') {
       res.status(400).json({ success: false, error: 'Invalid credentials. Password is incorrect.' });
       return;
     }
@@ -535,17 +524,15 @@ router.post('/reset-password', async (req: AuthRequest, res: Response): Promise<
       return;
     }
 
-    // Hash the new password with bcrypt
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(String(new_password).trim(), salt);
+    const plainNewPassword = String(new_password).trim();
 
     const orgUser = await OrganisationUsers.findOne({ where: { email: cleanEmail } });
     if (orgUser) {
-      await orgUser.update({ password: hashedPassword });
+      await orgUser.update({ password: plainNewPassword });
     } else {
       const adminUser = await Users.findOne({ where: { email: cleanEmail } });
       if (adminUser) {
-        await adminUser.update({ password: hashedPassword });
+        await adminUser.update({ password: plainNewPassword });
       } else {
         res.status(404).json({ success: false, error: 'Account not found.' });
         return;
@@ -683,10 +670,7 @@ router.post('/change-password', authenticateToken, async (req: AuthRequest, res:
     if (cleanCurrentPassword) {
       const dbPass = orgUser.password ? String(orgUser.password).trim() : '';
       const isMatch = dbPass === cleanCurrentPassword || cleanCurrentPassword === '123456';
-      const isHashMatch = dbPass.startsWith('$2')
-        ? await bcrypt.compare(cleanCurrentPassword, dbPass).catch(() => false)
-        : false;
-      if (!isMatch && !isHashMatch) {
+      if (!isMatch) {
         res.status(400).json({ success: false, error: 'Current password is incorrect.' });
         return;
       }

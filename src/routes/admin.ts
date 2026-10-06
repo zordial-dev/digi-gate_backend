@@ -5,7 +5,6 @@ import sequelize from '../config/database.js';
 import { createUpload } from '../middleware/upload.js';
 import { sendOrgApprovalEmail, sendOrgRejectionEmail } from '../utils/email.js';
 import crypto from 'crypto';
-import bcrypt from 'bcryptjs';
 
 const router = Router();
 
@@ -305,12 +304,10 @@ router.put('/requests/:id/approve', async (req, res) => {
       if (!existing) {
         // Fallback for legacy organisations created without organisation_users row
         const randomPassword = 'Org@' + crypto.randomBytes(4).toString('hex').toUpperCase();
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(randomPassword, salt);
         await OrganisationUsers.create({
           organisation_id: organisation.id,
           email: orgEmail,
-          password: hashedPassword,
+          password: randomPassword,
           role: 'super_admin',
           is_active: true,
         });

@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import bcrypt from 'bcryptjs';
 import { Organisations, OrganisationUsers, People, Visitors, VisitorVisits } from '../models/index.js';
 import { Op } from 'sequelize';
 import sequelize from '../config/database.js';
@@ -370,13 +369,10 @@ async function handleOrganisationRegistration(req: any, res: any) {
     });
 
     // 2. Create Organisation User entry (role: super_admin, by default is_active = true)
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(String(password).trim(), salt);
-
     await OrganisationUsers.create({
       organisation_id: newOrg.id,
       email: cleanEmail,
-      password: hashedPassword,
+      password: String(password).trim(),
       role: 'super_admin',
       is_active: true,
     });
