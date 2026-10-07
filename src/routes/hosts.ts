@@ -1,6 +1,7 @@
 import { Router } from 'express';
-import { People } from '../models/index.js';
+import { People, Organisations } from '../models/index.js';
 import { createUpload } from '../middleware/upload.js';
+import { sendHostWelcomeEmail, sendHostPasswordResetNotificationEmail } from '../utils/email.js';
 
 const router = Router();
 
@@ -38,16 +39,43 @@ router.post('/', profileUpload.single('profile_pic'), async (req, res) => {
     if (typeof data.unavailable_dates === 'string') {
       try { data.unavailable_dates = JSON.parse(data.unavailable_dates); } catch (_) {}
     }
-    if (data.password !== undefined && data.password !== null && String(data.password).trim() !== '') {
-      data.password = String(data.password).trim();
-    } else {
-      delete data.password;
-    }
+    
+    // Generate temporary password if not provided or empty
+    const tempPassword = (data.password !== undefined && data.password !== null && String(data.password).trim() !== '')
+      ? String(data.password).trim()
+      : `DG-${Math.floor(100000 + Math.random() * 900000)}`;
+
+    data.password = tempPassword;
+    data.is_first_login = true;
+
     if (data.is_blocked !== undefined) {
       data.is_blocked = data.is_blocked === true || data.is_blocked === 'true';
     }
+
     const host = await People.create(data);
-    res.status(201).json({ success: true, data: host });
+
+    // Fetch organisation name for welcome email
+    let orgName = '';
+    if (host.organisation_id) {
+      try {
+        const org = await Organisations.findByPk(host.organisation_id);
+        if (org) orgName = org.name;
+      } catch (_) {}
+    }
+
+    // Send Welcome Email (Host ID + Temp Password) as per sequence diagram
+    if (host.email) {
+      sendHostWelcomeEmail(host.email, host.full_name, host.id, tempPassword, orgName).catch((err) => {
+        console.error('Failed to send host welcome email in background:', err);
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      data: host,
+      tempPassword,
+      message: 'Host created successfully. Welcome email sent with temporary credentials.'
+    });
   } catch (error) {
     console.error('Error creating host:', error);
     res.status(500).json({ success: false, error: (error as Error).message });
@@ -181,7 +209,7 @@ router.patch('/:id/toggle-block', async (req, res) => {
 });
 
 // ============================================================
-// PATCH /api/hosts/:id/password - Change host password
+// PATCH /api/hosts/:id/password - Reset / Change host password
 // ============================================================
 router.patch('/:id/password', async (req, res) => {
   try {
@@ -192,15 +220,38 @@ router.patch('/:id/password', async (req, res) => {
     }
 
     const { password } = req.body;
-    if (!password || !String(password).trim()) {
-      return res.status(400).json({ success: false, error: 'Password is required' });
+    // If password provided, use it; otherwise generate a new one
+    const newPassword = (password && String(password).trim() !== '')
+      ? String(password).trim()
+      : `DG-${Math.floor(100000 + Math.random() * 900000)}`;
+
+    // As per sequence diagram: "Host logs in with Super Admin-provided password -> No password change step required"
+    await host.update({
+      password: newPassword,
+      is_first_login: false,
+    });
+
+    // Lookup organisation name for notification email
+    let orgName = '';
+    if (host.organisation_id) {
+      try {
+        const org = await Organisations.findByPk(host.organisation_id);
+        if (org) orgName = org.name;
+      } catch (_) {}
     }
 
-    await host.update({ password: String(password).trim() });
+    // Send Password Reset Email (No credentials included as per diagram)
+    if (host.email) {
+      sendHostPasswordResetNotificationEmail(host.email, host.full_name, orgName).catch((err) => {
+        console.error('Failed to send host password reset notification in background:', err);
+      });
+    }
+
     res.json({
       success: true,
       data: host,
-      message: 'Host password updated successfully',
+      newPassword,
+      message: 'Host password updated successfully. Notification email sent to host.',
     });
   } catch (error) {
     console.error('Error changing host password:', error);

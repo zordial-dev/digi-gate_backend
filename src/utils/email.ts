@@ -439,3 +439,131 @@ export const sendOrgRejectionEmail = async (
     return false;
   }
 };
+
+export const sendHostWelcomeEmail = async (
+  email: string,
+  hostName: string,
+  hostId: number | string,
+  tempPassword: string,
+  orgName?: string
+): Promise<boolean> => {
+  const subject = `Welcome to Digi-Gate - Your Host Login Credentials`;
+
+  const htmlContent = `
+    <div style="font-family: Arial, sans-serif; max-width: 550px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #f8fafc;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h2 style="color: #035352; margin: 0; font-size: 24px; font-weight: bold;">DIGI-GATE</h2>
+        <p style="color: #64748b; font-size: 13px; margin-top: 4px;">Host Access Portal</p>
+      </div>
+      <div style="background-color: #ffffff; padding: 28px; border-radius: 10px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+        <h3 style="color: #1e293b; margin-top: 0; font-size: 18px;">Welcome, ${hostName}!</h3>
+        <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+          You have been added as a Host for <strong>${orgName || 'your organisation'}</strong> on the Digi-Gate platform. Below are your initial login credentials:
+        </p>
+        <div style="background-color: #f1f5f9; padding: 18px; margin: 20px 0; border-radius: 8px; border-left: 4px solid #035352;">
+          <p style="margin: 0 0 8px 0; font-size: 13px; color: #475569;"><strong>Host ID:</strong> ${hostId}</p>
+          <p style="margin: 0 0 8px 0; font-size: 13px; color: #475569;"><strong>Email:</strong> ${email}</p>
+          <p style="margin: 0; font-size: 14px; color: #0f172a;"><strong>Temporary Password:</strong> <span style="font-family: monospace; background: #e2e8f0; padding: 2px 8px; border-radius: 4px; font-weight: bold; color: #035352;">${tempPassword}</span></p>
+        </div>
+        <p style="color: #d97706; font-size: 13px; line-height: 1.5; font-weight: 500;">
+          ⚠️ For security reasons, you will be prompted to set a new password upon your first login.
+        </p>
+        <div style="text-align: center; margin-top: 24px;">
+          <a href="http://localhost:5173/login" style="background-color: #035352; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 8px; font-size: 14px; font-weight: bold; display: inline-block;">
+            Log In to Host Portal
+          </a>
+        </div>
+      </div>
+      <div style="text-align: center; margin-top: 20px;">
+        <p style="color: #94a3b8; font-size: 12px; margin: 0;">Digi-Gate Access Control System &bull; All rights reserved.</p>
+      </div>
+    </div>
+  `;
+
+  console.log(`\n==================================================`);
+  console.log(`✉️ [HOST WELCOME EMAIL] To: ${email} | Host ID: ${hostId} | Temp Pass: ${tempPassword}`);
+  console.log(`==================================================\n`);
+
+  try {
+    const transporter = createTransporter();
+    const fromAddr = process.env.AWS_SES_FROM || process.env.SMTP_FROM || '"DigiLocal Platform" <connexon@zordial.com>';
+
+    if (transporter) {
+      await transporter.sendMail({
+        from: fromAddr,
+        to: email,
+        subject,
+        html: htmlContent,
+      });
+      console.log(`✅ Host welcome email sent successfully to ${email}`);
+      return true;
+    } else {
+      console.log(`ℹ️ SMTP not configured. Welcome email logged to console.`);
+      return true;
+    }
+  } catch (error) {
+    console.error(`⚠️ Failed to send host welcome email via SMTP to ${email}:`, error);
+    return false;
+  }
+};
+
+export const sendHostPasswordResetNotificationEmail = async (
+  email: string,
+  hostName: string,
+  orgName?: string
+): Promise<boolean> => {
+  const subject = `Your Digi-Gate Host Password Has Been Reset`;
+
+  const htmlContent = `
+    <div style="font-family: Arial, sans-serif; max-width: 550px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #f8fafc;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h2 style="color: #035352; margin: 0; font-size: 24px; font-weight: bold;">DIGI-GATE</h2>
+        <p style="color: #64748b; font-size: 13px; margin-top: 4px;">Host Access Portal</p>
+      </div>
+      <div style="background-color: #ffffff; padding: 28px; border-radius: 10px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+        <h3 style="color: #1e293b; margin-top: 0; font-size: 18px;">Hello, ${hostName}</h3>
+        <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+          Your host password for <strong>${orgName || 'Digi-Gate'}</strong> has been reset by the Administrator.
+        </p>
+        <p style="color: #475569; font-size: 13px; line-height: 1.6;">
+          For security purposes, credentials are not included in this email. Please contact your Organisation Administrator to obtain your new password.
+        </p>
+        <div style="text-align: center; margin-top: 24px;">
+          <a href="http://localhost:5173/login" style="background-color: #035352; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 8px; font-size: 14px; font-weight: bold; display: inline-block;">
+            Open Host Login
+          </a>
+        </div>
+      </div>
+      <div style="text-align: center; margin-top: 20px;">
+        <p style="color: #94a3b8; font-size: 12px; margin: 0;">Digi-Gate Access Control System &bull; All rights reserved.</p>
+      </div>
+    </div>
+  `;
+
+  console.log(`\n==================================================`);
+  console.log(`✉️ [HOST RESET NOTIFICATION] To: ${email} | Name: ${hostName} (No credentials sent)`);
+  console.log(`==================================================\n`);
+
+  try {
+    const transporter = createTransporter();
+    const fromAddr = process.env.AWS_SES_FROM || process.env.SMTP_FROM || '"DigiLocal Platform" <connexon@zordial.com>';
+
+    if (transporter) {
+      await transporter.sendMail({
+        from: fromAddr,
+        to: email,
+        subject,
+        html: htmlContent,
+      });
+      console.log(`✅ Host reset notification email sent successfully to ${email}`);
+      return true;
+    } else {
+      console.log(`ℹ️ SMTP not configured. Reset notification logged to console.`);
+      return true;
+    }
+  } catch (error) {
+    console.error(`⚠️ Failed to send host reset notification email to ${email}:`, error);
+    return false;
+  }
+};
+

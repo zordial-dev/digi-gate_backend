@@ -512,7 +512,7 @@ router.get('/:id/hosts', async (req, res) => {
 
     const hosts = await People.findAll({
       where,
-      attributes: ['id', 'full_name', 'email', 'mobile_number', 'designation', 'department', 'profile_pic', 'is_available', 'unavailable_dates', 'is_active', 'is_blocked', 'password'],
+      attributes: ['id', 'full_name', 'email', 'mobile_number', 'designation', 'department', 'profile_pic', 'is_available', 'unavailable_dates', 'is_active', 'is_blocked', 'password', 'is_first_login'],
       order: [['full_name', 'ASC']],
     });
 

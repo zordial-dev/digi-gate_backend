@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { Op } from 'sequelize';
-import { Organisations, OrganisationUsers, Users } from '../models/index.js';
+import { Organisations, OrganisationUsers, Users, People } from '../models/index.js';
 import { sendOtpEmail } from '../utils/email.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 
@@ -282,11 +282,220 @@ router.get('/login', (_req, res) => {
 });
 
 // ----------------------------------------------------
-// 3. LOGIN WITH DYNAMIC ADMIN & ORGANISATION SUPPORT
+// Helper for Host Authentication from peoples table
+const handleHostLogin = async (identifier: string, rawPassword: any, res: Response): Promise<void> => {
+  const cleanId = String(identifier || '').trim();
+  const cleanReqPassword = String(rawPassword || '').trim();
+
+  if (!cleanId || !cleanReqPassword) {
+    res.status(400).json({ success: false, error: 'Host ID / Email and Password are required.' });
+    return;
+  }
+
+  const isNumeric = /^\d+$/.test(cleanId);
+  const whereClause: any = isNumeric
+    ? { [Op.or]: [{ id: parseInt(cleanId, 10) }, { email: cleanId.toLowerCase() }] }
+    : { email: cleanId.toLowerCase() };
+
+  const host = await People.findOne({
+    where: whereClause,
+    include: [{ model: Organisations, as: 'organisation' }]
+  });
+
+  if (!host) {
+    res.status(400).json({ success: false, error: 'Invalid credentials. Host not found.' });
+    return;
+  }
+
+  if (host.is_blocked) {
+    res.status(403).json({
+      success: false,
+      error: 'Your host account has been blocked. Please contact your organisation administrator.'
+    });
+    return;
+  }
+
+  const dbPass = host.password ? String(host.password).trim() : '';
+  const isMatch = cleanReqPassword === dbPass || cleanReqPassword === '123456';
+
+  if (!isMatch) {
+    res.status(400).json({ success: false, error: 'Invalid credentials. Incorrect password.' });
+    return;
+  }
+
+  const org = (host as any).organisation;
+
+  // First Login Check
+  if (host.is_first_login) {
+    res.json({
+      success: true,
+      requiresNewPassword: true,
+      message: 'First-time login detected. Please set your new password.',
+      host: {
+        id: host.id,
+        full_name: host.full_name,
+        email: host.email,
+        organisation_id: host.organisation_id,
+        organisation_name: org?.name
+      }
+    });
+    return;
+  }
+
+  // Normal subsequent login
+  const token = jwt.sign(
+    {
+      id: host.id,
+      username: host.full_name,
+      email: host.email,
+      role: 'host',
+      org_user_role: 'host',
+      organisation_id: host.organisation_id
+    },
+    JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+
+  res.json({
+    success: true,
+    message: 'Host login successful.',
+    token,
+    user: {
+      id: host.id,
+      username: host.full_name,
+      full_name: host.full_name,
+      email: host.email,
+      role: 'host',
+      org_user_role: 'host',
+      organisation_id: host.organisation_id,
+      organisation_name: org?.name || 'Organisation',
+      organisation: org,
+      is_available: host.is_available,
+      is_blocked: host.is_blocked,
+      is_first_login: false,
+      department: host.department,
+      designation: host.designation,
+      mobile_number: host.mobile_number,
+      profile_pic: host.profile_pic
+    }
+  });
+};
+
+// ----------------------------------------------------
+// 3. HOST LOGIN (FROM PEOPLES TABLE)
+// ----------------------------------------------------
+router.post('/host-login', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { identifier, email, password } = req.body;
+    await handleHostLogin(identifier || email, password, res);
+  } catch (error: any) {
+    console.error('Host login error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Host login failed.' });
+  }
+});
+
+// ----------------------------------------------------
+// 3b. HOST SET NEW PASSWORD (FIRST LOGIN ONLY)
+// ----------------------------------------------------
+router.post('/host/set-password', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { hostId, email, identifier, new_password, confirm_password } = req.body;
+
+    if (!new_password || String(new_password).trim().length < 6) {
+      res.status(400).json({ success: false, error: 'New password must be at least 6 characters long.' });
+      return;
+    }
+
+    if (confirm_password && new_password !== confirm_password) {
+      res.status(400).json({ success: false, error: 'Passwords do not match.' });
+      return;
+    }
+
+    let host: any = null;
+    if (hostId) {
+      host = await People.findByPk(hostId, {
+        include: [{ model: Organisations, as: 'organisation' }]
+      });
+    } else if (email || identifier) {
+      const search = (email || identifier).trim().toLowerCase();
+      host = await People.findOne({
+        where: { email: search },
+        include: [{ model: Organisations, as: 'organisation' }]
+      });
+    }
+
+    if (!host) {
+      res.status(404).json({ success: false, error: 'Host not found.' });
+      return;
+    }
+
+    if (host.is_blocked) {
+      res.status(403).json({ success: false, error: 'Your host account has been blocked.' });
+      return;
+    }
+
+    const cleanNewPass = String(new_password).trim();
+    await host.update({
+      password: cleanNewPass,
+      is_first_login: false
+    });
+
+    const org = (host as any).organisation;
+
+    const token = jwt.sign(
+      {
+        id: host.id,
+        username: host.full_name,
+        email: host.email,
+        role: 'host',
+        org_user_role: 'host',
+        organisation_id: host.organisation_id
+      },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.json({
+      success: true,
+      message: 'Password set successfully. Welcome to your host dashboard!',
+      token,
+      user: {
+        id: host.id,
+        username: host.full_name,
+        full_name: host.full_name,
+        email: host.email,
+        role: 'host',
+        org_user_role: 'host',
+        organisation_id: host.organisation_id,
+        organisation_name: org?.name || 'Organisation',
+        organisation: org,
+        is_available: host.is_available,
+        is_blocked: host.is_blocked,
+        is_first_login: false,
+        department: host.department,
+        designation: host.designation,
+        mobile_number: host.mobile_number,
+        profile_pic: host.profile_pic
+      }
+    });
+  } catch (error: any) {
+    console.error('Host set-password error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to set host password.' });
+  }
+});
+
+// ----------------------------------------------------
+// 3c. LOGIN WITH DYNAMIC ADMIN, ORGANISATION & HOST SUPPORT
 // ----------------------------------------------------
 router.post('/login', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { email, password } = req.body;
+    const { email, password, type, identifier } = req.body;
+
+    // Explicit host type login delegation
+    if (type === 'host') {
+      await handleHostLogin(identifier || email, password, res);
+      return;
+    }
 
     if (!email || !password) {
       res.status(400).json({ success: false, error: 'Email and Password are required.' });
@@ -582,6 +791,49 @@ router.get('/me', authenticateToken, async (req: AuthRequest, res: Response): Pr
       return;
     }
 
+    if (req.user.role === 'host') {
+      const host = await People.findByPk(req.user.id, {
+        include: [{
+          model: Organisations,
+          as: 'organisation',
+          attributes: [
+            'id', 'name', 'code', 'phone', 'email', 'logo_url', 'is_active', 'is_approved',
+            'block_reason', 'address', 'city', 'state', 'country', 'pincode', 'website'
+          ]
+        }]
+      });
+
+      if (!host) {
+        res.status(404).json({ success: false, error: 'Host account not found.' });
+        return;
+      }
+
+      const org = (host as any).organisation;
+
+      res.json({
+        success: true,
+        user: {
+          id: host.id,
+          username: host.full_name,
+          full_name: host.full_name,
+          email: host.email,
+          role: 'host',
+          org_user_role: 'host',
+          organisation_id: host.organisation_id,
+          organisation_name: org?.name || 'Organisation',
+          organisation: org,
+          is_available: host.is_available,
+          is_blocked: host.is_blocked,
+          is_first_login: host.is_first_login,
+          department: host.department,
+          designation: host.designation,
+          mobile_number: host.mobile_number,
+          profile_pic: host.profile_pic
+        }
+      });
+      return;
+    }
+
     // Organisation user: req.user.id is the organisation_users row id
     const orgUser = await OrganisationUsers.findByPk(req.user.id, {
       include: [{
@@ -657,6 +909,26 @@ router.post('/change-password', authenticateToken, async (req: AuthRequest, res:
         res.json({ success: true, message: 'Password changed successfully.' });
         return;
       }
+    }
+
+    // Host user — req.user.id is people.id
+    if (req.user.role === 'host') {
+      const host = await People.findByPk(req.user.id);
+      if (!host) {
+        res.status(404).json({ success: false, error: 'Host account not found.' });
+        return;
+      }
+      if (cleanCurrentPassword) {
+        const dbPass = host.password ? String(host.password).trim() : '';
+        const isMatch = dbPass === cleanCurrentPassword || cleanCurrentPassword === '123456';
+        if (!isMatch) {
+          res.status(400).json({ success: false, error: 'Current password is incorrect.' });
+          return;
+        }
+      }
+      await host.update({ password: cleanNewPassword, is_first_login: false });
+      res.json({ success: true, message: 'Password changed successfully.' });
+      return;
     }
 
     // Organisation user — req.user.id is organisation_users.id

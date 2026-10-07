@@ -73,6 +73,11 @@ export default function(sequelize) {
       type: DataTypes.BOOLEAN,
       allowNull: false,
       defaultValue: false
+    },
+    is_first_login: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true
     }
   }, {
     tableName: 'people',
