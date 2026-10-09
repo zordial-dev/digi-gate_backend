@@ -3,7 +3,7 @@
  * Handles sending and verifying OTPs via MessageCentral API
  */
 
-const BASE_URL = process.env.MESSAGECENTRAL_BASE_URL || 'https://cpaas.messagecentral.com';
+const BASE_URL = process.env.MESSAGECENTRAL_BASE_URL;
 const CUSTOMER_ID = process.env.MESSAGECENTRAL_CUSTOMER_ID || '';
 const AUTH_TOKEN = process.env.MESSAGECENTRAL_AUTH_TOKEN || '';
 const FLOW_TYPE = process.env.MESSAGECENTRAL_FLOW_TYPE || 'SMS';
