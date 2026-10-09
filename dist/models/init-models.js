@@ -1,0 +1,42 @@
+import { DataTypes } from "sequelize";
+import _Organisations from "./Organisations.js";
+import _OrganisationUsers from "./OrganisationUsers.js";
+import _People from "./People.js";
+import _VisitorVisits from "./VisitorVisits.js";
+import _Visitors from "./Visitors.js";
+import _Users from "./Users.js";
+import _Roles from "./Roles.js";
+export function initModels(sequelize) {
+    var Organisations = _Organisations(sequelize, DataTypes);
+    var OrganisationUsers = _OrganisationUsers(sequelize, DataTypes);
+    var People = _People(sequelize, DataTypes);
+    var VisitorVisits = _VisitorVisits(sequelize, DataTypes);
+    var Visitors = _Visitors(sequelize, DataTypes);
+    var Users = _Users(sequelize, DataTypes);
+    var Roles = _Roles(sequelize, DataTypes);
+    People.belongsTo(Organisations, { as: "organisation", foreignKey: "organisation_id" });
+    Organisations.hasMany(People, { as: "people", foreignKey: "organisation_id" });
+    VisitorVisits.belongsTo(Organisations, { as: "organisation", foreignKey: "organisation_id" });
+    Organisations.hasMany(VisitorVisits, { as: "visitor_visits", foreignKey: "organisation_id" });
+    Visitors.belongsTo(Organisations, { as: "organisation", foreignKey: "organisation_id" });
+    Organisations.hasMany(Visitors, { as: "visitors", foreignKey: "organisation_id" });
+    VisitorVisits.belongsTo(People, { as: "host", foreignKey: "host_id" });
+    People.hasMany(VisitorVisits, { as: "visitor_visits", foreignKey: "host_id" });
+    VisitorVisits.belongsTo(Visitors, { as: "visitor", foreignKey: "visitor_id" });
+    Visitors.hasMany(VisitorVisits, { as: "visitor_visits", foreignKey: "visitor_id" });
+    // Organisation portal users (Phase 1: admin only)
+    OrganisationUsers.belongsTo(Organisations, { as: "organisation", foreignKey: "organisation_id" });
+    Organisations.hasMany(OrganisationUsers, { as: "org_users", foreignKey: "organisation_id" });
+    Users.belongsTo(Roles, { as: "role", foreignKey: "role_id" });
+    Roles.hasMany(Users, { as: "users", foreignKey: "role_id" });
+    return {
+        Organisations,
+        OrganisationUsers,
+        People,
+        VisitorVisits,
+        Visitors,
+        Users,
+        Roles,
+    };
+}
+export default initModels;

@@ -1,0 +1,693 @@
+import { Router } from 'express';
+import bcrypt from 'bcryptjs';
+import { Organisations, OrganisationUsers, People, Visitors, VisitorVisits } from '../models/index.js';
+import { Op } from 'sequelize';
+import sequelize from '../config/database.js';
+import { createUpload } from '../middleware/upload.js';
+import { sendRegistrationReceivedEmail, sendSuperAdminApprovalRequestEmail, sendOtpEmail } from '../utils/email.js';
+const router = Router();
+/**
+ * Helper to resolve integer organisation ID from parameter (which can be ID, code, or name)
+ */
+async function getOrgIdFromParam(param) {
+    if (!param || !param.trim())
+        return null;
+    const trimmed = param.trim();
+    const isNum = !isNaN(Number(trimmed)) && Number.isInteger(Number(trimmed));
+    if (isNum) {
+        const org = await Organisations.findByPk(Number(trimmed), { attributes: ['id'] });
+        if (org)
+            return org.id;
+    }
+    const org = await Organisations.findOne({
+        where: {
+            [Op.or]: [
+                { code: { [Op.iLike]: trimmed } },
+                { name: { [Op.iLike]: trimmed } },
+            ],
+        },
+        attributes: ['id'],
+    });
+    return org ? org.id : null;
+}
+// ============================================================
+// GET /api/organisations/code/:code - Get organisation specifically by code
+// ============================================================
+router.get('/code/:code', async (req, res) => {
+    try {
+        const code = req.params.code;
+        if (!code || code.trim() === '') {
+            return res.status(400).json({ success: false, error: 'Organisation code is required', data: null });
+        }
+        const organisation = await Organisations.findOne({
+            where: {
+                code: { [Op.iLike]: code.trim() },
+            },
+            include: {
+                model: People,
+                as: 'people',
+                where: { is_active: true },
+                attributes: ['id', 'full_name', 'designation', 'email', 'profile_pic', 'is_available', 'unavailable_dates'],
+                required: false,
+            },
+        });
+        if (!organisation) {
+            return res.status(404).json({ success: false, error: 'Organisation not found', data: null });
+        }
+        if (organisation.is_active === false || organisation.is_approved !== 1) {
+            return res.status(400).json({
+                success: false,
+                error: `Organisation "${organisation.name}" is inactive`,
+                org_name: organisation.name,
+                data: null,
+            });
+        }
+        const todayStr = new Date().toISOString().split('T')[0];
+        const orgData = organisation.toJSON();
+        if (orgData.people) {
+            orgData.people = orgData.people.map((person) => {
+                const dates = Array.isArray(person.unavailable_dates) ? person.unavailable_dates : [];
+                const isDateOff = dates.includes(todayStr);
+                const toggleAvailable = person.is_available ?? true;
+                return {
+                    ...person,
+                    is_available_toggle: toggleAvailable,
+                    is_date_unavailable: isDateOff,
+                    is_available: toggleAvailable && !isDateOff,
+                    unavailable_dates: dates,
+                };
+            });
+        }
+        res.json({ success: true, data: orgData });
+    }
+    catch (error) {
+        console.error('Error:', error);
+        res.status(500).json({ success: false, error: error.message, data: null });
+    }
+});
+// ============================================================
+// GET /api/organisations/:id - Get organisation by ID, Code, or Name
+// ============================================================
+router.get('/:id', async (req, res) => {
+    try {
+        const param = req.params.id;
+        if (!param || param.trim() === '') {
+            return res.status(400).json({ success: false, error: 'Organisation identifier is required', data: null });
+        }
+        const isNum = !isNaN(Number(param)) && Number.isInteger(Number(param));
+        let whereClause;
+        if (isNum) {
+            whereClause = {
+                [Op.or]: [
+                    { id: Number(param) },
+                    { code: { [Op.iLike]: param.trim() } },
+                ],
+            };
+        }
+        else {
+            whereClause = {
+                [Op.or]: [
+                    { code: { [Op.iLike]: param.trim() } },
+                    { name: { [Op.iLike]: param.trim() } },
+                ],
+            };
+        }
+        const organisation = await Organisations.findOne({
+            where: whereClause,
+            include: {
+                model: People,
+                as: 'people',
+                where: { is_active: true },
+                attributes: ['id', 'full_name', 'designation', 'email', 'profile_pic', 'is_available', 'unavailable_dates'],
+                required: false,
+            },
+        });
+        if (!organisation) {
+            return res.status(404).json({ success: false, error: 'Organisation not found', data: null });
+        }
+        if (organisation.is_active === false || organisation.is_approved !== 1) {
+            return res.status(400).json({
+                success: false,
+                error: `Organisation "${organisation.name}" is inactive`,
+                org_name: organisation.name,
+                data: null,
+            });
+        }
+        const todayStr = new Date().toISOString().split('T')[0];
+        const orgData = organisation.toJSON();
+        if (orgData.people) {
+            orgData.people = orgData.people.map((person) => {
+                const dates = Array.isArray(person.unavailable_dates) ? person.unavailable_dates : [];
+                const isDateOff = dates.includes(todayStr);
+                const toggleAvailable = person.is_available ?? true;
+                return {
+                    ...person,
+                    is_available_toggle: toggleAvailable,
+                    is_date_unavailable: isDateOff,
+                    is_available: toggleAvailable && !isDateOff,
+                    unavailable_dates: dates,
+                };
+            });
+        }
+        res.json({ success: true, data: orgData });
+    }
+    catch (error) {
+        console.error('Error:', error);
+        res.status(500).json({ success: false, error: error.message, data: null });
+    }
+});
+const logoUpload = createUpload({
+    folder: 'organisations',
+    filename: `logo_${Date.now()}`
+});
+// Store active registration verification OTPs in-memory (email -> { otp, expiresAt })
+const registrationOtps = new Map();
+// ============================================================
+// POST /api/organisations/send-verification-otp
+// ============================================================
+router.post('/send-verification-otp', async (req, res) => {
+    try {
+        const { email } = req.body;
+        if (!email || !String(email).trim()) {
+            return res.status(400).json({ success: false, error: 'Business email is required.' });
+        }
+        const cleanEmail = String(email).trim().toLowerCase();
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(cleanEmail)) {
+            return res.status(400).json({ success: false, error: 'Please enter a valid business email address.' });
+        }
+        // Check duplicate business email
+        const existingOrgUser = await OrganisationUsers.findOne({ where: { email: cleanEmail } });
+        if (existingOrgUser) {
+            return res.status(400).json({
+                success: false,
+                error: 'An organisation account with this business email already exists.',
+            });
+        }
+        // Generate secure 6-digit OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        registrationOtps.set(cleanEmail, {
+            otp,
+            expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
+        });
+        await sendOtpEmail(cleanEmail, otp, 'signup');
+        res.json({
+            success: true,
+            message: `Verification code sent to ${cleanEmail}`,
+            email: cleanEmail,
+        });
+    }
+    catch (error) {
+        console.error('Send OTP error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Failed to send verification code.' });
+    }
+});
+// ============================================================
+// POST /api/organisations/verify-registration-otp
+// ============================================================
+router.post('/verify-registration-otp', async (req, res) => {
+    try {
+        const { email, otp } = req.body;
+        if (!email || !otp) {
+            return res.status(400).json({ success: false, error: 'Email and verification code are required.' });
+        }
+        const cleanEmail = String(email).trim().toLowerCase();
+        const cleanOtp = String(otp).trim();
+        const record = registrationOtps.get(cleanEmail);
+        const isValid = Boolean(record && record.otp === cleanOtp && record.expiresAt > Date.now());
+        if (!isValid) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid or expired verification code. Please check the code or request a new one.',
+            });
+        }
+        // Mark as verified
+        registrationOtps.delete(cleanEmail);
+        res.json({
+            success: true,
+            message: 'Email verified successfully!',
+        });
+    }
+    catch (error) {
+        console.error('Verify OTP error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Verification failed.' });
+    }
+});
+// Helper to handle registration logic
+async function handleOrganisationRegistration(req, res) {
+    try {
+        const { name, email, password, address, city, state, country, pincode, phone, website, timezone, host_available_message, host_unavailable_message, } = req.body;
+        if (!name || !name.trim()) {
+            return res.status(400).json({ success: false, error: 'Organisation name is required' });
+        }
+        if (!email || !String(email).trim()) {
+            return res.status(400).json({ success: false, error: 'Business email is required' });
+        }
+        const cleanEmail = String(email).trim().toLowerCase();
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(cleanEmail)) {
+            return res.status(400).json({ success: false, error: 'Please enter a valid business email address' });
+        }
+        if (!password || String(password).trim().length < 6) {
+            return res.status(400).json({ success: false, error: 'Password is required and must be at least 6 characters' });
+        }
+        // Check duplicate business email
+        const existingOrgUser = await OrganisationUsers.findOne({ where: { email: cleanEmail } });
+        if (existingOrgUser) {
+            return res.status(400).json({
+                success: false,
+                error: 'An organisation account with this business email already exists.',
+            });
+        }
+        // Auto-generate unique organisation code
+        const cleanedName = name.trim().replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+        const baseCode = cleanedName.length >= 2 ? cleanedName.slice(0, 6) : 'ORG';
+        let orgCode = `${baseCode}_${Math.floor(1000 + Math.random() * 9000)}`;
+        let codeExists = await Organisations.findOne({ where: { code: orgCode } });
+        while (codeExists) {
+            orgCode = `${baseCode}_${Math.floor(1000 + Math.random() * 9000)}`;
+            codeExists = await Organisations.findOne({ where: { code: orgCode } });
+        }
+        const file = req.file;
+        let logo_url = req.body.logo_url || null;
+        if (file) {
+            logo_url = `/public/organisations/${file.filename}`;
+        }
+        // 1. Create Organisation entry
+        const newOrg = await Organisations.create({
+            name: name.trim(),
+            code: orgCode,
+            address: address ? address.trim() : null,
+            city: city ? city.trim() : null,
+            state: state ? state.trim() : null,
+            country: country ? country.trim() : null,
+            pincode: pincode ? pincode.trim() : null,
+            phone: phone ? phone.trim() : null,
+            email: cleanEmail,
+            website: website ? website.trim() : null,
+            logo_url: logo_url,
+            timezone: timezone && timezone.trim() ? timezone.trim() : 'Asia/Kolkata',
+            host_available_message: host_available_message ? host_available_message.trim() : undefined,
+            host_unavailable_message: host_unavailable_message ? host_unavailable_message.trim() : undefined,
+            is_active: false,
+            is_approved: 0, // Pending approval
+        });
+        // 2. Create Organisation User entry (role: super_admin, by default is_active = true)
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(String(password).trim(), salt);
+        await OrganisationUsers.create({
+            organisation_id: newOrg.id,
+            email: cleanEmail,
+            password: hashedPassword,
+            role: 'super_admin',
+            is_active: true,
+        });
+        // 3. Send "request received" email to applicant admin
+        await sendRegistrationReceivedEmail(cleanEmail, newOrg.name);
+        // 4. Send approval request email to Major SuperAdmin
+        await sendSuperAdminApprovalRequestEmail(newOrg.name, cleanEmail, newOrg.phone || undefined);
+        res.status(201).json({
+            success: true,
+            message: 'Organisation registration submitted successfully! A confirmation email has been sent. Your account is pending verification.',
+            data: newOrg,
+        });
+    }
+    catch (error) {
+        console.error('Organisation registration error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+}
+// POST /api/organisations/register - Business registration for new organisation
+router.post('/register', logoUpload.single('logo'), handleOrganisationRegistration);
+// Alias: POST /api/organisations
+router.post('/', logoUpload.single('logo'), handleOrganisationRegistration);
+router.put('/:id', logoUpload.single('logo'), async (req, res) => {
+    try {
+        const id = await getOrgIdFromParam(req.params.id);
+        if (!id) {
+            return res.status(404).json({ success: false, error: 'Organisation not found' });
+        }
+        const organisation = await Organisations.findByPk(id);
+        if (!organisation) {
+            return res.status(404).json({ success: false, error: 'Organisation not found' });
+        }
+        const data = req.body;
+        const file = req.file;
+        if (file) {
+            data.logo_url = `/public/organisations/${file.filename}`;
+        }
+        await organisation.update(data);
+        res.json({ success: true, data: organisation });
+    }
+    catch (error) {
+        console.error('Error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// ============================================================
+// GET /api/organisations/:id/settings - Get organisation settings
+// ============================================================
+router.get('/:id/settings', async (req, res) => {
+    try {
+        const id = await getOrgIdFromParam(req.params.id);
+        if (!id) {
+            return res.status(404).json({ success: false, error: 'Organisation not found' });
+        }
+        const organisation = await Organisations.findByPk(id, {
+            attributes: ['host_available_message', 'host_unavailable_message'],
+        });
+        if (!organisation) {
+            return res.status(404).json({ success: false, error: 'Organisation not found' });
+        }
+        res.json({
+            success: true,
+            data: {
+                host_available_message: organisation.host_available_message,
+                host_unavailable_message: organisation.host_unavailable_message,
+            },
+        });
+    }
+    catch (error) {
+        console.error('Error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// ============================================================
+// PUT /api/organisations/:id/settings - Update organisation settings
+// ============================================================
+router.put('/:id/settings', async (req, res) => {
+    try {
+        const id = await getOrgIdFromParam(req.params.id);
+        if (!id) {
+            return res.status(404).json({ success: false, error: 'Organisation not found' });
+        }
+        const { host_available_message, host_unavailable_message } = req.body;
+        const organisation = await Organisations.findByPk(id);
+        if (!organisation) {
+            return res.status(404).json({ success: false, error: 'Organisation not found' });
+        }
+        await organisation.update({
+            host_available_message: host_available_message || organisation.host_available_message,
+            host_unavailable_message: host_unavailable_message || organisation.host_unavailable_message,
+        });
+        res.json({ success: true, data: organisation });
+    }
+    catch (error) {
+        console.error('Error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// ============================================================
+// GET /api/organisations/:id/hosts - Get all hosts for organisation
+// ============================================================
+router.get('/:id/hosts', async (req, res) => {
+    try {
+        const id = await getOrgIdFromParam(req.params.id);
+        if (!id) {
+            return res.status(404).json({ success: false, error: 'Organisation not found' });
+        }
+        const { is_active } = req.query;
+        const where = { organisation_id: id };
+        if (is_active !== undefined) {
+            where.is_active = is_active === 'true';
+        }
+        const hosts = await People.findAll({
+            where,
+            attributes: ['id', 'full_name', 'email', 'mobile_number', 'designation', 'department', 'profile_pic', 'is_available', 'unavailable_dates', 'is_active'],
+            order: [['full_name', 'ASC']],
+        });
+        const todayStr = new Date().toISOString().split('T')[0];
+        const hostsData = hosts.map((h) => {
+            const item = h.toJSON();
+            const dates = Array.isArray(item.unavailable_dates) ? item.unavailable_dates : [];
+            const isDateOff = dates.includes(todayStr);
+            const toggleAvailable = item.is_available ?? true;
+            return {
+                ...item,
+                is_available_toggle: toggleAvailable,
+                is_date_unavailable: isDateOff,
+                is_available: toggleAvailable && !isDateOff,
+                unavailable_dates: dates,
+            };
+        });
+        res.json({ success: true, data: hostsData });
+    }
+    catch (error) {
+        console.error('Error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// ============================================================
+// GET /api/organisations/:id/visitors - Get all visitors for organisation
+// ============================================================
+router.get('/:id/visitors', async (req, res) => {
+    try {
+        const id = await getOrgIdFromParam(req.params.id);
+        if (!id) {
+            return res.status(404).json({ success: false, error: 'Organisation not found' });
+        }
+        const { page = 1, limit = 20, search, sortBy = 'id', sortOrder = 'DESC' } = req.query;
+        const offset = (parseInt(page) - 1) * parseInt(limit);
+        const where = { organisation_id: id };
+        if (search) {
+            where[Op.or] = [
+                { full_name: { [Op.iLike]: `%${search}%` } },
+                { company: { [Op.iLike]: `%${search}%` } },
+                { mobile_number: { [Op.iLike]: `%${search}%` } },
+            ];
+        }
+        const validSortBy = sortBy === 'created_at' ? 'id' : sortBy;
+        const { count, rows } = await Visitors.findAndCountAll({
+            where,
+            attributes: ['id', 'full_name', 'designation', 'company', 'location', 'email', 'linkedin', 'mobile_number'],
+            order: [[validSortBy, sortOrder]],
+            limit: parseInt(limit),
+            offset,
+        });
+        res.json({
+            success: true,
+            data: rows,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total: count,
+                totalPages: Math.ceil(count / parseInt(limit)),
+            },
+        });
+    }
+    catch (error) {
+        console.error('Error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// ============================================================
+// GET /api/organisations/:id/visits - Get all visits for organisation
+// ============================================================
+router.get('/:id/visits', async (req, res) => {
+    try {
+        const id = await getOrgIdFromParam(req.params.id);
+        if (!id) {
+            return res.status(404).json({ success: false, error: 'Organisation not found' });
+        }
+        const { page = 1, limit = 20, startDate, endDate, hostId, visitorId } = req.query;
+        const offset = (parseInt(page) - 1) * parseInt(limit);
+        const where = { organisation_id: id };
+        if (startDate) {
+            where.visit_date = { ...where.visit_date, [Op.gte]: new Date(startDate) };
+        }
+        if (endDate) {
+            where.visit_date = { ...where.visit_date, [Op.lte]: new Date(endDate) };
+        }
+        if (hostId) {
+            where.host_id = parseInt(hostId);
+        }
+        if (visitorId) {
+            where.visitor_id = parseInt(visitorId);
+        }
+        const { count, rows } = await VisitorVisits.findAndCountAll({
+            where,
+            include: [
+                {
+                    model: Visitors,
+                    as: 'visitor',
+                    attributes: ['id', 'full_name', 'company', 'mobile_number'],
+                },
+                {
+                    model: People,
+                    as: 'host',
+                    attributes: ['id', 'full_name', 'designation'],
+                },
+            ],
+            order: [['check_in_time', 'DESC']],
+            limit: parseInt(limit),
+            offset,
+        });
+        res.json({
+            success: true,
+            data: rows,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total: count,
+                totalPages: Math.ceil(count / parseInt(limit)),
+            },
+        });
+    }
+    catch (error) {
+        console.error('Error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// ============================================================
+// GET /api/organisations/:id/visits/today - Get today's visits
+// ============================================================
+router.get('/:id/visits/today', async (req, res) => {
+    try {
+        const id = await getOrgIdFromParam(req.params.id);
+        if (!id) {
+            return res.status(404).json({ success: false, error: 'Organisation not found' });
+        }
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const visits = await VisitorVisits.findAll({
+            where: {
+                organisation_id: id,
+                check_in_time: {
+                    [Op.gte]: today,
+                },
+            },
+            include: [
+                {
+                    model: Visitors,
+                    as: 'visitor',
+                    attributes: ['id', 'full_name', 'company'],
+                },
+                {
+                    model: People,
+                    as: 'host',
+                    attributes: ['id', 'full_name'],
+                },
+            ],
+            order: [['check_in_time', 'DESC']],
+        });
+        res.json({ success: true, data: visits });
+    }
+    catch (error) {
+        console.error('Error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// ============================================================
+// GET /api/organisations/:id/dashboard/stats - Get dashboard statistics
+// ============================================================
+router.get('/:id/dashboard/stats', async (req, res) => {
+    try {
+        const id = await getOrgIdFromParam(req.params.id);
+        if (!id) {
+            return res.status(404).json({ success: false, error: 'Organisation not found' });
+        }
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const [totalVisitors, totalVisits, todayVisits, activeHosts] = await Promise.all([
+            Visitors.count({ where: { organisation_id: id } }),
+            VisitorVisits.count({ where: { organisation_id: id } }),
+            VisitorVisits.count({
+                where: {
+                    organisation_id: id,
+                    check_in_time: {
+                        [Op.gte]: today,
+                    },
+                },
+            }),
+            People.count({
+                where: {
+                    organisation_id: id,
+                    is_available: true,
+                    is_active: true,
+                },
+            }),
+        ]);
+        res.json({
+            success: true,
+            data: {
+                total_visitors: totalVisitors,
+                total_visits: totalVisits,
+                today_visits: todayVisits,
+                active_hosts: activeHosts,
+            },
+        });
+    }
+    catch (error) {
+        console.error('Error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// ============================================================
+// GET /api/organisations/:id/dashboard/recent - Get recent visits
+// ============================================================
+router.get('/:id/dashboard/recent', async (req, res) => {
+    try {
+        const id = await getOrgIdFromParam(req.params.id);
+        if (!id) {
+            return res.status(404).json({ success: false, error: 'Organisation not found' });
+        }
+        const { limit = 5 } = req.query;
+        const visits = await VisitorVisits.findAll({
+            where: { organisation_id: id },
+            include: [
+                {
+                    model: Visitors,
+                    as: 'visitor',
+                    attributes: ['id', 'full_name', 'company'],
+                },
+                {
+                    model: People,
+                    as: 'host',
+                    attributes: ['id', 'full_name'],
+                },
+            ],
+            order: [['check_in_time', 'DESC']],
+            limit: parseInt(limit),
+        });
+        res.json({ success: true, data: visits });
+    }
+    catch (error) {
+        console.error('Error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// ============================================================
+// GET /api/organisations/:id/dashboard/visitor-stats - Visitor statistics by day
+// ============================================================
+router.get('/:id/dashboard/visitor-stats', async (req, res) => {
+    try {
+        const id = await getOrgIdFromParam(req.params.id);
+        if (!id) {
+            return res.status(404).json({ success: false, error: 'Organisation not found' });
+        }
+        const { days = 7 } = req.query;
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - parseInt(days));
+        const visits = await VisitorVisits.findAll({
+            where: {
+                organisation_id: id,
+                check_in_time: {
+                    [Op.gte]: startDate,
+                },
+            },
+            attributes: [
+                [sequelize.fn('DATE', sequelize.col('check_in_time')), 'date'],
+                [sequelize.fn('COUNT', sequelize.col('id')), 'count'],
+            ],
+            group: [sequelize.fn('DATE', sequelize.col('check_in_time'))],
+            order: [[sequelize.fn('DATE', sequelize.col('check_in_time')), 'ASC']],
+            raw: true,
+        });
+        res.json({ success: true, data: visits });
+    }
+    catch (error) {
+        console.error('Error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+export default router;

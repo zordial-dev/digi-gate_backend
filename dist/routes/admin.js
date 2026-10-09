@@ -1,0 +1,420 @@
+import { Router } from 'express';
+import { Organisations, OrganisationUsers, People } from '../models/index.js';
+import { Op } from 'sequelize';
+import { createUpload } from '../middleware/upload.js';
+import { sendOrgApprovalEmail, sendOrgRejectionEmail } from '../utils/email.js';
+import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
+const router = Router();
+// ============================================================
+// DASHBOARD STATS
+// ============================================================
+router.get('/dashboard/stats', async (req, res) => {
+    try {
+        const [totalOrganisations, activeOrganisations, pendingRequests] = await Promise.all([
+            Organisations.count({ where: { is_approved: 1 } }),
+            Organisations.count({ where: { is_active: true, is_approved: 1 } }),
+            Organisations.count({ where: { is_approved: { [Op.ne]: 1 } } }),
+        ]);
+        res.json({
+            success: true,
+            data: {
+                total_organisations: totalOrganisations,
+                active_organisations: activeOrganisations,
+                pending_requests: pendingRequests,
+            },
+        });
+    }
+    catch (error) {
+        console.error('Error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// ============================================================
+// RECENT ORGANISATIONS
+// ============================================================
+router.get('/dashboard/recent', async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit || '5');
+        const organisations = await Organisations.findAll({
+            where: { is_approved: 1 },
+            order: [['id', 'DESC']],
+            limit: limit,
+            attributes: ['id', 'name', 'code', 'logo_url', 'city', 'is_active', 'is_approved'],
+        });
+        res.json({ success: true, data: organisations });
+    }
+    catch (error) {
+        console.error('Error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// ============================================================
+// GET ALL APPROVED ORGANISATIONS (with pagination & search)
+// ============================================================
+router.get('/organisations', async (req, res) => {
+    try {
+        const page = parseInt(req.query.page || '1');
+        const limit = parseInt(req.query.limit || '10');
+        const search = req.query.search || '';
+        const offset = (page - 1) * limit;
+        const where = {
+            is_approved: 1,
+        };
+        if (search) {
+            where[Op.and] = [
+                { is_approved: 1 },
+                {
+                    [Op.or]: [
+                        { name: { [Op.iLike]: `%${search}%` } },
+                        { city: { [Op.iLike]: `%${search}%` } },
+                    ],
+                },
+            ];
+        }
+        const { count, rows } = await Organisations.findAndCountAll({
+            where,
+            attributes: ['id', 'name', 'code', 'logo_url', 'city', 'address', 'phone', 'email', 'website', 'is_active', 'is_approved'],
+            order: [['id', 'DESC']],
+            limit: limit,
+            offset,
+        });
+        res.json({
+            success: true,
+            data: rows,
+            pagination: {
+                page: page,
+                limit: limit,
+                total: count,
+                totalPages: Math.ceil(count / limit),
+            },
+        });
+    }
+    catch (error) {
+        console.error('Error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// ============================================================
+// GET ORGANISATION BY ID
+// ============================================================
+router.get('/organisations/:id', async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        if (isNaN(id)) {
+            return res.status(400).json({ success: false, error: 'Invalid ID' });
+        }
+        const organisation = await Organisations.findByPk(id);
+        if (!organisation) {
+            return res.status(404).json({ success: false, error: 'Organisation not found' });
+        }
+        res.json({ success: true, data: organisation });
+    }
+    catch (error) {
+        console.error('Error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// ============================================================
+// GET ORGANISATION HOSTS BY ID
+// ============================================================
+router.get('/organisations/:id/hosts', async (req, res) => {
+    try {
+        const organisation_id = parseInt(req.params.id);
+        if (isNaN(organisation_id)) {
+            return res.status(400).json({ success: false, error: 'Invalid ID' });
+        }
+        const hosts = await People.findAll({
+            where: { organisation_id },
+            order: [['full_name', 'ASC']],
+            attributes: ['id', 'full_name', 'email', 'mobile_number', 'designation', 'department', 'profile_pic', 'is_available'],
+        });
+        res.json({ success: true, data: hosts });
+    }
+    catch (error) {
+        console.error('Error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// ============================================================
+// CREATE ORGANISATION (with logo upload)
+// ============================================================
+const logoUpload = createUpload({
+    folder: 'organisations',
+    filename: `logo_${Date.now()}`
+});
+router.post('/organisations', logoUpload.single('logo'), async (req, res) => {
+    try {
+        const data = req.body;
+        const file = req.file;
+        if (file) {
+            data.logo_url = `/public/organisations/${file.filename}`;
+        }
+        const organisation = await Organisations.create(data);
+        res.status(201).json({ success: true, data: organisation });
+    }
+    catch (error) {
+        console.error('Error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// ============================================================
+// UPDATE ORGANISATION (with logo upload)
+// ============================================================
+router.put('/organisations/:id', logoUpload.single('logo'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        if (isNaN(id)) {
+            return res.status(400).json({ success: false, error: 'Invalid ID' });
+        }
+        const data = req.body;
+        const file = req.file;
+        const organisation = await Organisations.findByPk(id);
+        if (!organisation) {
+            return res.status(404).json({ success: false, error: 'Organisation not found' });
+        }
+        if (file) {
+            data.logo_url = `/public/organisations/${file.filename}`;
+        }
+        await organisation.update(data);
+        res.json({ success: true, data: organisation });
+    }
+    catch (error) {
+        console.error('Error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// ============================================================
+// GET REGISTRATION REQUESTS (unapproved: pending, hold, denied)
+// ============================================================
+router.get('/requests', async (req, res) => {
+    try {
+        const page = parseInt(req.query.page || '1');
+        const limit = parseInt(req.query.limit || '20');
+        const search = req.query.search || '';
+        const status = req.query.status || 'all';
+        const offset = (page - 1) * limit;
+        const where = {};
+        if (status === 'pending') {
+            where.is_approved = 0;
+        }
+        else if (status === 'hold') {
+            where.is_approved = 2;
+        }
+        else if (status === 'denied') {
+            where.is_approved = 3;
+        }
+        else {
+            where.is_approved = { [Op.ne]: 1 };
+        }
+        if (search) {
+            where[Op.and] = [
+                ...(where.is_approved !== undefined ? [{ is_approved: where.is_approved }] : [{ is_approved: { [Op.ne]: 1 } }]),
+                {
+                    [Op.or]: [
+                        { name: { [Op.iLike]: `%${search}%` } },
+                        { city: { [Op.iLike]: `%${search}%` } },
+                        { phone: { [Op.iLike]: `%${search}%` } },
+                        { email: { [Op.iLike]: `%${search}%` } },
+                    ],
+                },
+            ];
+            delete where.is_approved;
+        }
+        const { count, rows } = await Organisations.findAndCountAll({
+            where,
+            order: [['id', 'DESC']],
+            limit: limit,
+            offset,
+        });
+        res.json({
+            success: true,
+            data: rows,
+            pagination: {
+                page: page,
+                limit: limit,
+                total: count,
+                totalPages: Math.ceil(count / limit),
+            },
+        });
+    }
+    catch (error) {
+        console.error('Error fetching registration requests:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// ============================================================
+// APPROVE REGISTRATION REQUEST
+// ============================================================
+// ============================================================
+// APPROVE REGISTRATION REQUEST
+// ============================================================
+router.put('/requests/:id/approve', async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        if (isNaN(id)) {
+            return res.status(400).json({ success: false, error: 'Invalid ID' });
+        }
+        const organisation = await Organisations.findByPk(id);
+        if (!organisation) {
+            return res.status(404).json({ success: false, error: 'Organisation not found' });
+        }
+        // Mark org as approved & active
+        await organisation.update({
+            is_approved: 1,
+            is_active: true,
+            block_reason: null,
+        });
+        const orgEmail = organisation.email;
+        if (orgEmail) {
+            const existing = await OrganisationUsers.findOne({
+                where: { organisation_id: organisation.id }
+            });
+            if (!existing) {
+                // Fallback for legacy organisations created without organisation_users row
+                const randomPassword = 'Org@' + crypto.randomBytes(4).toString('hex').toUpperCase();
+                const salt = await bcrypt.genSalt(10);
+                const hashedPassword = await bcrypt.hash(randomPassword, salt);
+                await OrganisationUsers.create({
+                    organisation_id: organisation.id,
+                    email: orgEmail,
+                    password: hashedPassword,
+                    role: 'super_admin',
+                    is_active: true,
+                });
+                await sendOrgApprovalEmail(orgEmail, organisation.name, randomPassword);
+            }
+            else {
+                // User created during registration with their own password
+                if (existing.role !== 'super_admin' || !existing.is_active) {
+                    await existing.update({ role: 'super_admin', is_active: true });
+                }
+                await sendOrgApprovalEmail(orgEmail, organisation.name);
+            }
+        }
+        res.json({
+            success: true,
+            message: 'Organisation approved successfully! Approval notification sent via email.',
+            data: organisation,
+        });
+    }
+    catch (error) {
+        console.error('Error approving request:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// ============================================================
+// HOLD REGISTRATION REQUEST (with message)
+// ============================================================
+router.put('/requests/:id/hold', async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const { message } = req.body;
+        if (isNaN(id)) {
+            return res.status(400).json({ success: false, error: 'Invalid ID' });
+        }
+        if (!message || !message.trim()) {
+            return res.status(400).json({ success: false, error: 'Hold message/reason is required' });
+        }
+        const organisation = await Organisations.findByPk(id);
+        if (!organisation) {
+            return res.status(404).json({ success: false, error: 'Organisation not found' });
+        }
+        await organisation.update({
+            is_approved: 2,
+            is_active: false,
+            block_reason: message.trim(),
+        });
+        if (organisation.email) {
+            await sendOrgRejectionEmail(organisation.email, organisation.name, `Application Placed on Hold: ${message.trim()}`);
+        }
+        res.json({
+            success: true,
+            message: 'Organisation registration put on hold and notification sent.',
+            data: organisation,
+        });
+    }
+    catch (error) {
+        console.error('Error holding request:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// ============================================================
+// DENY REGISTRATION REQUEST (with message)
+// ============================================================
+router.put('/requests/:id/deny', async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const { message } = req.body;
+        if (isNaN(id)) {
+            return res.status(400).json({ success: false, error: 'Invalid ID' });
+        }
+        if (!message || !message.trim()) {
+            return res.status(400).json({ success: false, error: 'Deny message/reason is required' });
+        }
+        const organisation = await Organisations.findByPk(id);
+        if (!organisation) {
+            return res.status(404).json({ success: false, error: 'Organisation not found' });
+        }
+        await organisation.update({
+            is_approved: 3,
+            is_active: false,
+            block_reason: message.trim(),
+        });
+        if (organisation.email) {
+            await sendOrgRejectionEmail(organisation.email, organisation.name, message.trim());
+        }
+        res.json({
+            success: true,
+            message: 'Organisation registration denied and notification sent.',
+            data: organisation,
+        });
+    }
+    catch (error) {
+        console.error('Error denying request:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// ============================================================
+// DELETE ORGANISATION
+// ============================================================
+router.delete('/organisations/:id', async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        if (isNaN(id)) {
+            return res.status(400).json({ success: false, error: 'Invalid ID' });
+        }
+        const organisation = await Organisations.findByPk(id);
+        if (!organisation) {
+            return res.status(404).json({ success: false, error: 'Organisation not found' });
+        }
+        await organisation.destroy();
+        res.json({ success: true, message: 'Organisation deleted successfully' });
+    }
+    catch (error) {
+        console.error('Error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// ============================================================
+// TOGGLE ORGANISATION STATUS
+// ============================================================
+router.patch('/organisations/:id/toggle-status', async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        if (isNaN(id)) {
+            return res.status(400).json({ success: false, error: 'Invalid ID' });
+        }
+        const organisation = await Organisations.findByPk(id);
+        if (!organisation) {
+            return res.status(404).json({ success: false, error: 'Organisation not found' });
+        }
+        await organisation.update({ is_active: !organisation.is_active });
+        res.json({ success: true, data: organisation });
+    }
+    catch (error) {
+        console.error('Error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+export default router;
