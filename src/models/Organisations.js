@@ -81,6 +81,26 @@ export default function(sequelize) {
     block_reason: {
       type: DataTypes.TEXT,
       allowNull: true
+    },
+    working_days: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      defaultValue: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    },
+    opening_time: {
+      type: DataTypes.STRING(10),
+      allowNull: true,
+      defaultValue: '09:00'
+    },
+    closing_time: {
+      type: DataTypes.STRING(10),
+      allowNull: true,
+      defaultValue: '18:00'
+    },
+    holidays: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      defaultValue: []
     }
   }, {
     tableName: 'organisations',

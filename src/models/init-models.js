@@ -6,6 +6,7 @@ import _VisitorVisits from "./VisitorVisits.js";
 import _Visitors from "./Visitors.js";
 import _Users from "./Users.js";
 import _Roles from "./Roles.js";
+import _Invitations from "./Invitations.js";
 
 export function initModels(sequelize) {
   var Organisations = _Organisations(sequelize, DataTypes);
@@ -15,6 +16,7 @@ export function initModels(sequelize) {
   var Visitors = _Visitors(sequelize, DataTypes);
   var Users = _Users(sequelize, DataTypes);
   var Roles = _Roles(sequelize, DataTypes);
+  var Invitations = _Invitations(sequelize, DataTypes);
 
   People.belongsTo(Organisations, { as: "organisation", foreignKey: "organisation_id"});
   Organisations.hasMany(People, { as: "people", foreignKey: "organisation_id"});
@@ -31,6 +33,14 @@ export function initModels(sequelize) {
   OrganisationUsers.belongsTo(Organisations, { as: "organisation", foreignKey: "organisation_id" });
   Organisations.hasMany(OrganisationUsers, { as: "org_users", foreignKey: "organisation_id" });
 
+  // Invitations associations
+  Invitations.belongsTo(Organisations, { as: "organisation", foreignKey: "organisation_id" });
+  Organisations.hasMany(Invitations, { as: "invitations", foreignKey: "organisation_id" });
+  Invitations.belongsTo(People, { as: "host", foreignKey: "host_id" });
+  People.hasMany(Invitations, { as: "invitations", foreignKey: "host_id" });
+  Invitations.belongsTo(VisitorVisits, { as: "visit", foreignKey: "visit_id" });
+  VisitorVisits.hasOne(Invitations, { as: "invitation", foreignKey: "visit_id" });
+
   Users.belongsTo(Roles, { as: "role", foreignKey: "role_id" });
   Roles.hasMany(Users, { as: "users", foreignKey: "role_id" });
 
@@ -42,6 +52,7 @@ export function initModels(sequelize) {
     Visitors,
     Users,
     Roles,
+    Invitations,
   };
 }
 export default initModels;

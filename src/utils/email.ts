@@ -68,8 +68,8 @@ export const sendOtpEmail = async (
   otp: string,
   purpose: 'signup' | 'forgot_password'
 ): Promise<EmailSendResult> => {
-  const subject = purpose === 'signup' 
-    ? 'Digi-Gate Verification OTP' 
+  const subject = purpose === 'signup'
+    ? 'Digi-Gate Verification OTP'
     : 'Digi-Gate Password Reset OTP';
 
   const titleText = purpose === 'signup'
@@ -219,7 +219,7 @@ export const sendRegistrationReceivedEmail = async (
 
   try {
     const transporter = createTransporter();
-    const fromAddr = process.env.AWS_SES_FROM || process.env.SMTP_FROM || '"DigiLocal Platform" <connexon@zordial.com>';
+    const fromAddr = process.env.AWS_SES_FROM || process.env.SMTP_FROM || '"DigiGate Platform" <connexon@zordial.com>';
 
     if (transporter) {
       await transporter.sendMail({
@@ -280,7 +280,7 @@ export const sendSuperAdminApprovalRequestEmail = async (
 
   try {
     const transporter = createTransporter();
-    const fromAddr = process.env.AWS_SES_FROM || process.env.SMTP_FROM || '"DigiLocal Platform" <connexon@zordial.com>';
+    const fromAddr = process.env.AWS_SES_FROM || process.env.SMTP_FROM || '"DigiGate Platform" <connexon@zordial.com>';
 
     if (transporter) {
       await transporter.sendMail({
@@ -358,7 +358,7 @@ export const sendOrgApprovalEmail = async (
 
   try {
     const transporter = createTransporter();
-    const fromAddr = process.env.AWS_SES_FROM || process.env.SMTP_FROM || '"DigiLocal Platform" <connexon@zordial.com>';
+    const fromAddr = process.env.AWS_SES_FROM || process.env.SMTP_FROM || '"DigiGate Platform" <connexon@zordial.com>';
 
     if (transporter) {
       await transporter.sendMail({
@@ -419,7 +419,7 @@ export const sendOrgRejectionEmail = async (
 
   try {
     const transporter = createTransporter();
-    const fromAddr = process.env.AWS_SES_FROM || process.env.SMTP_FROM || '"DigiLocal Platform" <connexon@zordial.com>';
+    const fromAddr = process.env.AWS_SES_FROM || process.env.SMTP_FROM || '"DigiGate Platform" <connexon@zordial.com>';
 
     if (transporter) {
       await transporter.sendMail({
@@ -486,7 +486,7 @@ export const sendHostWelcomeEmail = async (
 
   try {
     const transporter = createTransporter();
-    const fromAddr = process.env.AWS_SES_FROM || process.env.SMTP_FROM || '"DigiLocal Platform" <connexon@zordial.com>';
+    const fromAddr = process.env.AWS_SES_FROM || process.env.SMTP_FROM || '"DigiGate Platform" <connexon@zordial.com>';
 
     if (transporter) {
       await transporter.sendMail({
@@ -546,7 +546,7 @@ export const sendHostPasswordResetNotificationEmail = async (
 
   try {
     const transporter = createTransporter();
-    const fromAddr = process.env.AWS_SES_FROM || process.env.SMTP_FROM || '"DigiLocal Platform" <connexon@zordial.com>';
+    const fromAddr = process.env.AWS_SES_FROM || process.env.SMTP_FROM || '"DigiGate Platform" <connexon@zordial.com>';
 
     if (transporter) {
       await transporter.sendMail({

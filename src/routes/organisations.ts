@@ -4,6 +4,7 @@ import { Op } from 'sequelize';
 import sequelize from '../config/database.js';
 import { createUpload } from '../middleware/upload.js';
 import { sendRegistrationReceivedEmail, sendSuperAdminApprovalRequestEmail, sendOtpEmail } from '../utils/email.js';
+import { computeHostAvailability, computeOrganisationStatus } from '../utils/availability.js';
 
 const router = Router();
 
@@ -54,7 +55,11 @@ router.get('/code/:code', async (req, res) => {
           is_active: true,
           [Op.or]: [{ is_blocked: false }, { is_blocked: null }],
         },
-        attributes: ['id', 'full_name', 'designation', 'email', 'profile_pic', 'is_available', 'unavailable_dates'],
+        attributes: [
+          'id', 'full_name', 'designation', 'email', 'profile_pic', 'is_available', 
+          'unavailable_dates', 'available_from', 'available_to', 'lunch_from', 
+          'lunch_to', 'working_days', 'date_overrides', 'is_blocked'
+        ],
         required: false,
       },
     });
@@ -72,19 +77,15 @@ router.get('/code/:code', async (req, res) => {
       });
     }
 
-    const todayStr = new Date().toISOString().split('T')[0];
     const orgData = organisation.toJSON();
+    orgData.org_status = computeOrganisationStatus(orgData);
     if (orgData.people) {
       orgData.people = orgData.people.map((person: any) => {
-        const dates = Array.isArray(person.unavailable_dates) ? person.unavailable_dates : [];
-        const isDateOff = dates.includes(todayStr);
-        const toggleAvailable = person.is_available ?? true;
+        const avail = computeHostAvailability(person);
         return {
           ...person,
-          is_available_toggle: toggleAvailable,
-          is_date_unavailable: isDateOff,
-          is_available: toggleAvailable && !isDateOff,
-          unavailable_dates: dates,
+          ...avail,
+          is_date_unavailable: avail.is_on_leave,
         };
       });
     }
@@ -134,7 +135,11 @@ router.get('/:id', async (req, res) => {
           is_active: true,
           [Op.or]: [{ is_blocked: false }, { is_blocked: null }],
         },
-        attributes: ['id', 'full_name', 'designation', 'email', 'profile_pic', 'is_available', 'unavailable_dates'],
+        attributes: [
+          'id', 'full_name', 'designation', 'email', 'profile_pic', 'is_available', 
+          'unavailable_dates', 'available_from', 'available_to', 'lunch_from', 
+          'lunch_to', 'working_days', 'date_overrides', 'is_blocked'
+        ],
         required: false,
       },
     });
@@ -152,19 +157,15 @@ router.get('/:id', async (req, res) => {
       });
     }
 
-    const todayStr = new Date().toISOString().split('T')[0];
     const orgData = organisation.toJSON();
+    orgData.org_status = computeOrganisationStatus(orgData);
     if (orgData.people) {
       orgData.people = orgData.people.map((person: any) => {
-        const dates = Array.isArray(person.unavailable_dates) ? person.unavailable_dates : [];
-        const isDateOff = dates.includes(todayStr);
-        const toggleAvailable = person.is_available ?? true;
+        const avail = computeHostAvailability(person);
         return {
           ...person,
-          is_available_toggle: toggleAvailable,
-          is_date_unavailable: isDateOff,
-          is_available: toggleAvailable && !isDateOff,
-          unavailable_dates: dates,
+          ...avail,
+          is_date_unavailable: avail.is_on_leave,
         };
       });
     }
@@ -418,10 +419,16 @@ router.put('/:id', logoUpload.single('logo'), async (req, res) => {
       return res.status(404).json({ success: false, error: 'Organisation not found' });
     }
 
-    const data = req.body;
+    const data = { ...req.body };
     const file = (req as any).file;
     if (file) {
       data.logo_url = `/public/organisations/${file.filename}`;
+    }
+    if (typeof data.working_days === 'string') {
+      try { data.working_days = JSON.parse(data.working_days); } catch (_) {}
+    }
+    if (typeof data.holidays === 'string') {
+      try { data.holidays = JSON.parse(data.holidays); } catch (_) {}
     }
 
     await organisation.update(data);
@@ -444,7 +451,14 @@ router.get('/:id/settings', async (req, res) => {
     }
 
     const organisation = await Organisations.findByPk(id, {
-      attributes: ['host_available_message', 'host_unavailable_message'],
+      attributes: [
+        'host_available_message', 
+        'host_unavailable_message',
+        'working_days',
+        'opening_time',
+        'closing_time',
+        'holidays'
+      ],
     });
 
     if (!organisation) {
@@ -456,6 +470,10 @@ router.get('/:id/settings', async (req, res) => {
       data: {
         host_available_message: organisation.host_available_message,
         host_unavailable_message: organisation.host_unavailable_message,
+        working_days: organisation.working_days || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+        opening_time: organisation.opening_time || '09:00',
+        closing_time: organisation.closing_time || '18:00',
+        holidays: organisation.holidays || [],
       },
     });
   } catch (error) {
@@ -474,17 +492,39 @@ router.put('/:id/settings', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Organisation not found' });
     }
 
-    const { host_available_message, host_unavailable_message } = req.body;
+    const { 
+      host_available_message, 
+      host_unavailable_message,
+      working_days,
+      opening_time,
+      closing_time,
+      holidays
+    } = req.body;
 
     const organisation = await Organisations.findByPk(id);
     if (!organisation) {
       return res.status(404).json({ success: false, error: 'Organisation not found' });
     }
 
-    await organisation.update({
-      host_available_message: host_available_message || organisation.host_available_message,
-      host_unavailable_message: host_unavailable_message || organisation.host_unavailable_message,
-    });
+    let parsedWorkingDays = working_days;
+    if (typeof working_days === 'string') {
+      try { parsedWorkingDays = JSON.parse(working_days); } catch (_) {}
+    }
+
+    let parsedHolidays = holidays;
+    if (typeof holidays === 'string') {
+      try { parsedHolidays = JSON.parse(holidays); } catch (_) {}
+    }
+
+    const updateFields: any = {};
+    if (host_available_message !== undefined) updateFields.host_available_message = host_available_message;
+    if (host_unavailable_message !== undefined) updateFields.host_unavailable_message = host_unavailable_message;
+    if (parsedWorkingDays !== undefined) updateFields.working_days = parsedWorkingDays;
+    if (opening_time !== undefined) updateFields.opening_time = opening_time;
+    if (closing_time !== undefined) updateFields.closing_time = closing_time;
+    if (parsedHolidays !== undefined) updateFields.holidays = parsedHolidays;
+
+    await organisation.update(updateFields);
 
     res.json({ success: true, data: organisation });
   } catch (error) {
@@ -512,22 +552,22 @@ router.get('/:id/hosts', async (req, res) => {
 
     const hosts = await People.findAll({
       where,
-      attributes: ['id', 'full_name', 'email', 'mobile_number', 'designation', 'department', 'profile_pic', 'is_available', 'unavailable_dates', 'is_active', 'is_blocked', 'password', 'is_first_login'],
+      attributes: [
+        'id', 'organisation_id', 'full_name', 'email', 'mobile_number', 'designation', 
+        'department', 'profile_pic', 'is_available', 'unavailable_dates', 'available_from', 
+        'available_to', 'lunch_from', 'lunch_to', 'working_days', 'date_overrides', 
+        'is_active', 'is_blocked', 'password', 'is_first_login'
+      ],
       order: [['full_name', 'ASC']],
     });
 
-    const todayStr = new Date().toISOString().split('T')[0];
     const hostsData = hosts.map((h: any) => {
       const item = h.toJSON();
-      const dates = Array.isArray(item.unavailable_dates) ? item.unavailable_dates : [];
-      const isDateOff = dates.includes(todayStr);
-      const toggleAvailable = item.is_available ?? true;
+      const avail = computeHostAvailability(item);
       return {
         ...item,
-        is_available_toggle: toggleAvailable,
-        is_date_unavailable: isDateOff,
-        is_available: toggleAvailable && !isDateOff,
-        unavailable_dates: dates,
+        ...avail,
+        is_date_unavailable: avail.is_on_leave,
       };
     });
 

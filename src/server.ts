@@ -14,6 +14,7 @@ import authRoutes from './routes/auth.js';
 import organisationUsersRoutes from './routes/organisationUsers.js';
 import selfiesRoutes from './routes/selfies.js';
 import visitsRoutes from './routes/visits.js';
+import invitationsRoutes from './routes/invitations.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -36,7 +37,6 @@ app.use('/api/selfies', selfiesRoutes);
 const publicDir = path.join(__dirname, '../public');
 app.use('/public', express.static(publicDir));
 app.use('/logos', express.static(path.join(publicDir, 'logos')));
-app.use('/hosts', express.static(path.join(publicDir, 'hosts')));
 app.use('/profiles', express.static(path.join(publicDir, 'profiles')));
 app.use('/organisations', express.static(path.join(publicDir, 'organisations')));
 app.use(express.static(publicDir));
@@ -55,6 +55,8 @@ app.use('/visits', visitsRoutes);
 app.use('/api/visits', visitsRoutes);
 
 // Other API Routes
+app.use('/api/invitations', invitationsRoutes);
+app.use('/invitations', invitationsRoutes);
 app.use('/api/hosts', hostRoutes);
 app.use('/api/organisations', organisationsRoutes);
 app.use('/api/visitors', visitorsRoutes);
@@ -88,6 +90,40 @@ const startServer = async (): Promise<void> => {
     await sequelize.authenticate();
     console.log('✅ Database connected successfully');
 
+    try {
+      await sequelize.query(`
+        ALTER TABLE organisations 
+        ADD COLUMN IF NOT EXISTS working_days JSON DEFAULT '["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]',
+        ADD COLUMN IF NOT EXISTS opening_time VARCHAR(10) DEFAULT '09:00',
+        ADD COLUMN IF NOT EXISTS closing_time VARCHAR(10) DEFAULT '18:00',
+        ADD COLUMN IF NOT EXISTS holidays JSON DEFAULT '[]';
+
+        CREATE TABLE IF NOT EXISTS invitations (
+          id SERIAL PRIMARY KEY,
+          invitation_code VARCHAR(30) UNIQUE NOT NULL,
+          organisation_id INTEGER REFERENCES organisations(id) ON DELETE CASCADE,
+          host_id INTEGER REFERENCES people(id) ON DELETE CASCADE,
+          visitor_name VARCHAR(150) NOT NULL,
+          mobile_number VARCHAR(20) NOT NULL,
+          purpose_of_visit VARCHAR(255) NOT NULL,
+          valid_date DATE NOT NULL DEFAULT CURRENT_DATE,
+          valid_until TIMESTAMP WITH TIME ZONE NOT NULL,
+          additional_notes TEXT,
+          status VARCHAR(20) NOT NULL DEFAULT 'active',
+          used_at TIMESTAMP WITH TIME ZONE,
+          visit_id INTEGER REFERENCES visitor_visits(id) ON DELETE SET NULL,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_invitations_mobile ON invitations(mobile_number);
+        CREATE INDEX IF NOT EXISTS idx_invitations_code ON invitations(invitation_code);
+        CREATE INDEX IF NOT EXISTS idx_invitations_org ON invitations(organisation_id);
+        CREATE INDEX IF NOT EXISTS idx_invitations_host ON invitations(host_id);
+      `);
+      console.log('✅ Organisation and invitations schema verified');
+    } catch (migErr) {
+      console.error('Schema migration note:', migErr);
+    }
 
     await sequelize.sync();
     console.log('✅ Database synchronized successfully');

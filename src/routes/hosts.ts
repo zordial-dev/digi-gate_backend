@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { People, Organisations } from '../models/index.js';
 import { createUpload } from '../middleware/upload.js';
 import { sendHostWelcomeEmail, sendHostPasswordResetNotificationEmail } from '../utils/email.js';
@@ -39,21 +39,43 @@ router.post('/', profileUpload.single('profile_pic'), async (req, res) => {
     if (typeof data.unavailable_dates === 'string') {
       try { data.unavailable_dates = JSON.parse(data.unavailable_dates); } catch (_) {}
     }
+    const cleanEmail = data.email ? String(data.email).trim().toLowerCase() : '';
+    const orgId = data.organisation_id ? parseInt(String(data.organisation_id), 10) : null;
+    if (!cleanEmail) {
+      return res.status(400).json({ success: false, error: 'Host email address is required.' });
+    }
+    if (!data.full_name || !String(data.full_name).trim()) {
+      return res.status(400).json({ success: false, error: 'Host full name is required.' });
+    }
+    if (!orgId) {
+      return res.status(400).json({ success: false, error: 'Organisation ID is required.' });
+    }
+    // Check if host with this email already exists in this organisation
+    const existingHost = await People.findOne({
+      where: {
+        organisation_id: orgId,
+        email: cleanEmail,
+      },
+    });
+    if (existingHost) {
+      return res.status(400).json({
+        success: false,
+        error: `A host with email "${cleanEmail}" already exists in this organisation.`,
+      });
+    }
+    data.email = cleanEmail;
+    data.organisation_id = orgId;
     
     // Generate temporary password if not provided or empty
     const tempPassword = (data.password !== undefined && data.password !== null && String(data.password).trim() !== '')
       ? String(data.password).trim()
       : `DG-${Math.floor(100000 + Math.random() * 900000)}`;
-
     data.password = tempPassword;
     data.is_first_login = true;
-
     if (data.is_blocked !== undefined) {
       data.is_blocked = data.is_blocked === true || data.is_blocked === 'true';
     }
-
     const host = await People.create(data);
-
     // Fetch organisation name for welcome email
     let orgName = '';
     if (host.organisation_id) {
@@ -62,23 +84,32 @@ router.post('/', profileUpload.single('profile_pic'), async (req, res) => {
         if (org) orgName = org.name;
       } catch (_) {}
     }
-
-    // Send Welcome Email (Host ID + Temp Password) as per sequence diagram
+    // Send Welcome Email (Host ID + Temp Password)
     if (host.email) {
       sendHostWelcomeEmail(host.email, host.full_name, host.id, tempPassword, orgName).catch((err) => {
         console.error('Failed to send host welcome email in background:', err);
       });
     }
-
     res.status(201).json({
       success: true,
       data: host,
       tempPassword,
       message: 'Host created successfully. Welcome email sent with temporary credentials.'
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error creating host:', error);
-    res.status(500).json({ success: false, error: (error as Error).message });
+    if (
+      error.name === 'SequelizeUniqueConstraintError' ||
+      error.original?.code === '23505' ||
+      error.parent?.code === '23505' ||
+      String(error.message).includes('already exists')
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: 'A host with this email already exists in this organisation.',
+      });
+    }
+    res.status(500).json({ success: false, error: error.message || 'Failed to create host.' });
   }
 });
 
@@ -157,9 +188,9 @@ router.patch('/:id/toggle-availability', async (req, res) => {
 });
 
 // ============================================================
-// PATCH /api/hosts/:id/unavailable-dates - Update unavailable dates calendar
+// PATCH /api/hosts/:id/availability & /unavailable-dates
 // ============================================================
-router.patch('/:id/unavailable-dates', async (req, res) => {
+const handleUpdateAvailability = async (req: express.Request, res: express.Response) => {
   try {
     const id = parseInt(req.params.id as string);
     const host = await People.findByPk(id);
@@ -167,22 +198,62 @@ router.patch('/:id/unavailable-dates', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Host not found' });
     }
     
-    const { unavailable_dates } = req.body;
-    let dates = unavailable_dates;
-    if (typeof dates === 'string') {
-      try { dates = JSON.parse(dates); } catch (_) {}
-    }
-    if (!Array.isArray(dates)) {
-      return res.status(400).json({ success: false, error: 'unavailable_dates must be an array of date strings' });
+    const updateData: any = {};
+    const {
+      unavailable_dates,
+      available_from,
+      available_to,
+      lunch_from,
+      lunch_to,
+      working_days,
+      date_overrides,
+    } = req.body;
+
+    if (unavailable_dates !== undefined) {
+      let dates = unavailable_dates;
+      if (typeof dates === 'string') {
+        try { dates = JSON.parse(dates); } catch (_) {}
+      }
+      if (Array.isArray(dates)) {
+        updateData.unavailable_dates = dates;
+      }
     }
 
-    await host.update({ unavailable_dates: dates });
+    if (available_from !== undefined) updateData.available_from = available_from || '09:00:00';
+    if (available_to !== undefined) updateData.available_to = available_to || '18:00:00';
+    if (lunch_from !== undefined) updateData.lunch_from = lunch_from || '13:00:00';
+    if (lunch_to !== undefined) updateData.lunch_to = lunch_to || '14:00:00';
+
+    if (working_days !== undefined) {
+      let days = working_days;
+      if (typeof days === 'string') {
+        try { days = JSON.parse(days); } catch (_) {}
+      }
+      if (Array.isArray(days)) {
+        updateData.working_days = days;
+      }
+    }
+
+    if (date_overrides !== undefined) {
+      let overrides = date_overrides;
+      if (typeof overrides === 'string') {
+        try { overrides = JSON.parse(overrides); } catch (_) {}
+      }
+      if (typeof overrides === 'object' && overrides !== null) {
+        updateData.date_overrides = overrides;
+      }
+    }
+
+    await host.update(updateData);
     res.json({ success: true, data: host });
   } catch (error) {
-    console.error('Error updating unavailable dates:', error);
+    console.error('Error updating availability:', error);
     res.status(500).json({ success: false, error: (error as Error).message });
   }
-});
+};
+
+router.patch('/:id/unavailable-dates', handleUpdateAvailability);
+router.patch('/:id/availability', handleUpdateAvailability);
 
 // ============================================================
 // PATCH /api/hosts/:id/toggle-block - Block / Unblock host

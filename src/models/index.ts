@@ -11,6 +11,7 @@ export const {
   Visitors,
   Users,
   Roles,
+  Invitations,
 } = models;
 
 export { sequelize };

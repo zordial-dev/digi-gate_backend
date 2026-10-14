@@ -3,6 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import { VisitorVisits, Organisations, People, Visitors } from '../models/index.js';
 import { pool } from '../config/database.js';
+import { computeHostAvailability, computeOrganisationStatus } from '../utils/availability.js';
 
 const router = Router();
 
@@ -56,7 +57,10 @@ router.post('/', handleUpload, async (req, res) => {
 
     // Get host details
     const host = await People.findByPk(host_id, {
-      attributes: ['is_available', 'unavailable_dates', 'full_name'],
+      attributes: [
+        'id', 'full_name', 'unavailable_dates', 'available_from', 'available_to',
+        'lunch_from', 'lunch_to', 'working_days', 'date_overrides'
+      ],
     });
 
     if (!host) {
@@ -68,25 +72,47 @@ router.post('/', handleUpload, async (req, res) => {
       attributes: ['full_name'],
     });
 
-    // Get organisation messages
+    // Get organisation details & validate operating status
     const org = await Organisations.findByPk(organisation_id, {
-      attributes: ['host_available_message', 'host_unavailable_message'],
+      attributes: [
+        'name',
+        'host_available_message', 
+        'host_unavailable_message',
+        'working_days',
+        'opening_time',
+        'closing_time',
+        'holidays'
+      ],
     });
 
-    // Generate confirmation message using dual check (Toggle AND Calendar dates)
-    const todayStr = new Date().toISOString().split('T')[0];
-    const dates = Array.isArray((host as any).unavailable_dates) ? (host as any).unavailable_dates : [];
-    const isDateOff = dates.includes(todayStr);
-    const toggleAvailable = host.is_available ?? true;
-    const isHostAvailable = toggleAvailable && !isDateOff;
+    if (org) {
+      const orgStatus = computeOrganisationStatus(org.toJSON ? org.toJSON() : org);
+      if (!orgStatus.is_open) {
+        return res.status(400).json({
+          success: false,
+          error: orgStatus.status_message,
+          org_status: orgStatus,
+        });
+      }
+    }
+
+    // Generate confirmation message using comprehensive Availability check
+    const hostJson = host.toJSON ? host.toJSON() : host;
+    const avail = computeHostAvailability(hostJson);
+    const isHostAvailable = avail.is_available;
     let confirmationMessage = '';
 
     if (isHostAvailable) {
       confirmationMessage = org?.host_available_message || 
         'Thank you for visiting :visitor_name! :host_name will be with you shortly.';
     } else {
-      confirmationMessage = org?.host_unavailable_message || 
-        'Thank you for your interest :visitor_name. :host_name is currently unavailable.';
+      if (avail.is_lunch) {
+        confirmationMessage = org?.host_unavailable_message || 
+          `Thank you for visiting :visitor_name. :host_name is currently on lunch break (${avail.lunch_from} - ${avail.lunch_to}) and will be available soon.`;
+      } else {
+        confirmationMessage = org?.host_unavailable_message || 
+          `Thank you for your interest :visitor_name. :host_name is currently unavailable (${avail.availability_status}).`;
+      }
     }
 
     // Replace placeholders supporting both :variable and {variable} formats
@@ -171,6 +197,17 @@ router.post('/', handleUpload, async (req, res) => {
            filename, visit_id, data, mime_type, byte_size, uploaded_at
          ) VALUES ($1, $2, $3, $4, $5, NOW())`,
         [filename, visit.id, imageBuffer, mimeType, imageBuffer.length]
+      );
+    }
+
+    // If invitation_code provided, mark invitation as USED and link visit_id
+    const invitationCode = req.body.invitation_code ? String(req.body.invitation_code).trim().toUpperCase() : null;
+    if (invitationCode) {
+      await client.query(
+        `UPDATE invitations 
+         SET status = 'used', used_at = CURRENT_TIMESTAMP, visit_id = $1, updated_at = CURRENT_TIMESTAMP 
+         WHERE invitation_code = $2 AND status = 'active'`,
+        [visit.id, invitationCode]
       );
     }
 
