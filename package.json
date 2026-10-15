@@ -8,6 +8,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "generate-models": "tsx src/scripts/generate-models.ts",
+    "create-tables": "tsx src/scripts/create-tables.ts",
     "lint": "eslint .",
     "preview": "vite preview"
   },

@@ -49,11 +49,33 @@ export default function(sequelize) {
     },
     available_from: {
       type: DataTypes.TIME,
-      allowNull: true
+      allowNull: true,
+      defaultValue: '09:00:00'
     },
     available_to: {
       type: DataTypes.TIME,
-      allowNull: true
+      allowNull: true,
+      defaultValue: '18:00:00'
+    },
+    lunch_from: {
+      type: DataTypes.TIME,
+      allowNull: true,
+      defaultValue: '13:00:00'
+    },
+    lunch_to: {
+      type: DataTypes.TIME,
+      allowNull: true,
+      defaultValue: '14:00:00'
+    },
+    working_days: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      defaultValue: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
+    },
+    date_overrides: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      defaultValue: {}
     },
     unavailable_dates: {
       type: DataTypes.JSON,

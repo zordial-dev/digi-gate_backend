@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { pool } from '../config/database.js';
+import { computeOrganisationStatus } from '../utils/availability.js';
 
 const router = Router();
 
@@ -69,6 +70,17 @@ export const createVisitHandler = async (req: Request, res: Response): Promise<v
       const o = await client.query('SELECT id FROM organisations LIMIT 1');
       organisationId = o.rows[0]?.id || 1;
     }
+
+    const orgRes = await client.query('SELECT name, working_days, opening_time, closing_time, holidays FROM organisations WHERE id = $1', [organisationId]);
+    if (orgRes.rows.length > 0) {
+      const orgStatus = computeOrganisationStatus(orgRes.rows[0]);
+      if (!orgStatus.is_open) {
+        await client.query('ROLLBACK');
+        res.status(400).json({ success: false, error: orgStatus.status_message, org_status: orgStatus });
+        return;
+      }
+    }
+
     if (!hostId) {
       const h = await client.query('SELECT id FROM people LIMIT 1');
       hostId = h.rows[0]?.id || 1;
@@ -106,6 +118,16 @@ export const createVisitHandler = async (req: Request, res: Response): Promise<v
       mimeType,
       buffer.length,
     ]);
+
+    const invitationCode = req.body.invitation_code ? String(req.body.invitation_code).trim().toUpperCase() : null;
+    if (invitationCode) {
+      await client.query(
+        `UPDATE invitations 
+         SET status = 'used', used_at = CURRENT_TIMESTAMP, visit_id = $1, updated_at = CURRENT_TIMESTAMP 
+         WHERE invitation_code = $2 AND status = 'active'`,
+        [visit.id, invitationCode]
+      );
+    }
 
     await client.query('COMMIT');
 
