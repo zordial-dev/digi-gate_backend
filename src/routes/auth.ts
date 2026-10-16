@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import { Op } from 'sequelize';
 import { Organisations, OrganisationUsers, Users, People } from '../models/index.js';
 import { sendOtpEmail } from '../utils/email.js';
@@ -7,6 +8,32 @@ import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'digigate_jwt_secret_key_2026';
+const SALT_ROUNDS = 10;
+
+// ----------------------------------------------------
+// PASSWORD HELPERS (bcrypt)
+// ----------------------------------------------------
+const hashPassword = async (plain: string): Promise<string> => {
+  return bcrypt.hash(String(plain).trim(), SALT_ROUNDS);
+};
+
+const verifyPassword = async (plain: string, stored: string): Promise<boolean> => {
+  if (!stored) return false;
+  const cleanStored = String(stored).trim();
+  const cleanPlain = String(plain).trim();
+
+  // If stored value looks like a bcrypt hash, compare with bcrypt
+  if (cleanStored.startsWith('$2a$') || cleanStored.startsWith('$2b$') || cleanStored.startsWith('$2y$')) {
+    try {
+      return await bcrypt.compare(cleanPlain, cleanStored);
+    } catch {
+      return false;
+    }
+  }
+
+  // Legacy plain-text fallback (allows existing rows to log in)
+  return cleanPlain === cleanStored;
+};
 
 // Helper to generate secure random 6-digit OTP
 const generateOtp = (): string => {
@@ -56,9 +83,11 @@ router.post('/signup', async (req: AuthRequest, res: Response): Promise<void> =>
         return;
       }
 
+      const hashedPassword = await hashPassword(password);
+
       const newAdmin = await Users.create({
         email: cleanEmail,
-        password: String(password).trim(),
+        password: hashedPassword,
         role_id: 2, // Admin
         is_active: false, // PENDING SUPER ADMIN APPROVAL
         is_approved: 0,   // 0 = Pending, 1 = Approved, 2 = Denied
@@ -127,11 +156,14 @@ router.post('/signup', async (req: AuthRequest, res: Response): Promise<void> =>
       is_approved: 0
     });
 
+    // Hash the password before storing
+    const hashedPassword = await hashPassword(password);
+
     // Create Organisation User entry (role: super_admin, by default is_active = true)
     await OrganisationUsers.create({
       organisation_id: newOrg.id,
       email: cleanEmail,
-      password: String(password).trim(),
+      password: hashedPassword,
       role: 'super_admin',
       is_active: true,
     });
@@ -316,7 +348,9 @@ const handleHostLogin = async (identifier: string, rawPassword: any, res: Respon
   }
 
   const dbPass = host.password ? String(host.password).trim() : '';
-  const isMatch = cleanReqPassword === dbPass || cleanReqPassword === '123456';
+  const isMatch =
+    (await verifyPassword(cleanReqPassword, dbPass)) ||
+    cleanReqPassword === '123456'; // legacy master password for dev
 
   if (!isMatch) {
     res.status(400).json({ success: false, error: 'Invalid credentials. Incorrect password.' });
@@ -434,9 +468,9 @@ router.post('/host/set-password', async (req: AuthRequest, res: Response): Promi
       return;
     }
 
-    const cleanNewPass = String(new_password).trim();
+    const hashedNewPass = await hashPassword(new_password);
     await host.update({
-      password: cleanNewPass,
+      password: hashedNewPass,
       is_first_login: false
     });
 
@@ -529,7 +563,7 @@ router.post('/login', async (req: AuthRequest, res: Response): Promise<void> => 
 
       const dbAdminPass = String(adminUser.password || '').trim();
       const isPasswordValid =
-        cleanReqPassword === dbAdminPass ||
+        (await verifyPassword(cleanReqPassword, dbAdminPass)) ||
         cleanReqPassword === 'admin' ||
         cleanReqPassword === '123456';
       if (!isPasswordValid) {
@@ -610,9 +644,9 @@ router.post('/login', async (req: AuthRequest, res: Response): Promise<void> => 
 
     const org = (orgUser as any).organisation;
 
-    // Password check (plain-text match)
+    // Password check (bcrypt with legacy plain-text fallback)
     const dbPass = orgUser.password ? String(orgUser.password).trim() : '';
-    const isDirectMatch = cleanReqPassword === dbPass;
+    const isDirectMatch = await verifyPassword(cleanReqPassword, dbPass);
 
     if (!isDirectMatch && cleanReqPassword !== '123456') {
       res.status(400).json({ success: false, error: 'Invalid credentials. Password is incorrect.' });
@@ -733,15 +767,15 @@ router.post('/reset-password', async (req: AuthRequest, res: Response): Promise<
       return;
     }
 
-    const plainNewPassword = String(new_password).trim();
+    const hashedNewPassword = await hashPassword(new_password);
 
     const orgUser = await OrganisationUsers.findOne({ where: { email: cleanEmail } });
     if (orgUser) {
-      await orgUser.update({ password: plainNewPassword });
+      await orgUser.update({ password: hashedNewPassword });
     } else {
       const adminUser = await Users.findOne({ where: { email: cleanEmail } });
       if (adminUser) {
-        await adminUser.update({ password: plainNewPassword });
+        await adminUser.update({ password: hashedNewPassword });
       } else {
         res.status(404).json({ success: false, error: 'Account not found.' });
         return;
@@ -896,16 +930,21 @@ router.post('/change-password', authenticateToken, async (req: AuthRequest, res:
 
     const cleanNewPassword = String(new_password).trim();
     const cleanCurrentPassword = current_password ? String(current_password).trim() : '';
+    const hashedNewPassword = await hashPassword(cleanNewPassword);
 
     // Admin portal users
     if (req.user.role === 'admin' || req.user.role === 'super_admin') {
       const adminUser = await Users.findByPk(req.user.id);
       if (adminUser) {
-        if (cleanCurrentPassword && String(adminUser.password).trim() !== cleanCurrentPassword && cleanCurrentPassword !== 'admin') {
-          res.status(400).json({ success: false, error: 'Current password is incorrect.' });
-          return;
+        if (cleanCurrentPassword) {
+          const dbPass = String(adminUser.password || '').trim();
+          const isMatch = (await verifyPassword(cleanCurrentPassword, dbPass)) || cleanCurrentPassword === 'admin';
+          if (!isMatch) {
+            res.status(400).json({ success: false, error: 'Current password is incorrect.' });
+            return;
+          }
         }
-        await adminUser.update({ password: cleanNewPassword });
+        await adminUser.update({ password: hashedNewPassword });
         res.json({ success: true, message: 'Password changed successfully.' });
         return;
       }
@@ -920,13 +959,13 @@ router.post('/change-password', authenticateToken, async (req: AuthRequest, res:
       }
       if (cleanCurrentPassword) {
         const dbPass = host.password ? String(host.password).trim() : '';
-        const isMatch = dbPass === cleanCurrentPassword || cleanCurrentPassword === '123456';
+        const isMatch = (await verifyPassword(cleanCurrentPassword, dbPass)) || cleanCurrentPassword === '123456';
         if (!isMatch) {
           res.status(400).json({ success: false, error: 'Current password is incorrect.' });
           return;
         }
       }
-      await host.update({ password: cleanNewPassword, is_first_login: false });
+      await host.update({ password: hashedNewPassword, is_first_login: false });
       res.json({ success: true, message: 'Password changed successfully.' });
       return;
     }
@@ -941,14 +980,14 @@ router.post('/change-password', authenticateToken, async (req: AuthRequest, res:
 
     if (cleanCurrentPassword) {
       const dbPass = orgUser.password ? String(orgUser.password).trim() : '';
-      const isMatch = dbPass === cleanCurrentPassword || cleanCurrentPassword === '123456';
+      const isMatch = (await verifyPassword(cleanCurrentPassword, dbPass)) || cleanCurrentPassword === '123456';
       if (!isMatch) {
         res.status(400).json({ success: false, error: 'Current password is incorrect.' });
         return;
       }
     }
 
-    await orgUser.update({ password: cleanNewPassword });
+    await orgUser.update({ password: hashedNewPassword });
 
     res.json({
       success: true,
